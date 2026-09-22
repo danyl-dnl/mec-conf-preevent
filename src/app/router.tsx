@@ -1,9 +1,10 @@
 import { createBrowserRouter } from "react-router-dom";
+import ParticipantHome from "../pages/participant/ParticipantHome";
 
 const router = createBrowserRouter([
   {
     path: "/",
-    element: <h1>MEC CONF Pre-Event — Participant Portal</h1>,
+    element: <ParticipantHome />,
   },
   {
     path: "/admin",
