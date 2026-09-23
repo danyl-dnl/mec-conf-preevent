@@ -1,174 +1,81 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useId } from "react";
 import { supabase } from "../../lib/supabase";
+import {
+  parseCsvFile,
+  autoDetectMapping,
+  isMappingComplete,
+  getMappingConflicts,
+  buildPayload,
+} from "./rosterCsv";
+import type {
+  ParsedCsv,
+  FieldMapping,
+  RequiredField,
+  PreviewResultRow,
+  PreviewCategory,
+  PreviewState,
+  RosterPayloadRow,
+} from "./rosterTypes";
 
 // ---------------------------------------------------------------------------
-// Types
+// Design tokens
 // ---------------------------------------------------------------------------
 
-type AdminStatus =
-  | "loading"
-  | "unauthenticated"
-  | "is_admin"
-  | "not_admin"
-  | "error";
-
-// ---------------------------------------------------------------------------
-// Design tokens (inline — keeps this a single self-contained file)
-// ---------------------------------------------------------------------------
-
-const GREEN = "#39ff14";
-const GREEN_DIM = "rgba(57,255,20,0.55)";
+const GREEN       = "#39ff14";
+const GREEN_DIM   = "rgba(57,255,20,0.55)";
 const GREEN_FAINT = "rgba(57,255,20,0.12)";
-const BG = "#050905";
-
-const s = {
-  page: {
-    background: BG,
-    minHeight: "100svh",
-    flex: "1",
-    display: "flex",
-    flexDirection: "column" as const,
-    alignItems: "center",
-    justifyContent: "center",
-    padding: "32px 24px",
-    fontFamily: "'Courier New', Courier, monospace",
-    color: GREEN,
-    boxSizing: "border-box" as const,
-  },
-  card: {
-    width: "100%",
-    maxWidth: "420px",
-    display: "flex",
-    flexDirection: "column" as const,
-  },
-  siteLabel: {
-    fontSize: "11px",
-    letterSpacing: "0.18em",
-    color: GREEN_DIM,
-    marginBottom: "40px",
-    lineHeight: "1.8",
-  },
-  heading: {
-    fontSize: "clamp(38px,11vw,54px)",
-    fontWeight: "bold",
-    color: GREEN,
-    lineHeight: "1.0",
-    letterSpacing: "-0.01em",
-    margin: "0 0 20px",
-    textShadow: `0 0 28px ${GREEN_DIM}`,
-  },
-  subtext: {
-    fontSize: "14px",
-    color: GREEN_DIM,
-    lineHeight: "1.8",
-    margin: "0 0 40px",
-    letterSpacing: "0.02em",
-  },
-  primaryBtn: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: "10px",
-    width: "100%",
-    padding: "16px 24px",
-    background: GREEN,
-    color: BG,
-    border: "none",
-    fontFamily: "'Courier New', Courier, monospace",
-    fontSize: "13px",
-    fontWeight: "bold",
-    letterSpacing: "0.14em",
-    cursor: "pointer",
-    marginBottom: "14px",
-    boxShadow: `0 0 18px ${GREEN_FAINT}`,
-  },
-  secondaryBtn: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    width: "100%",
-    padding: "14px 24px",
-    background: "transparent",
-    color: GREEN,
-    border: `1px solid ${GREEN}`,
-    fontFamily: "'Courier New', Courier, monospace",
-    fontSize: "13px",
-    fontWeight: "bold",
-    letterSpacing: "0.14em",
-    cursor: "pointer",
-    opacity: 0.75,
-  },
-  statusBar: {
-    marginTop: "48px",
-    paddingTop: "16px",
-    borderTop: `1px solid ${GREEN_FAINT}`,
-    fontSize: "10px",
-    color: GREEN_DIM,
-    letterSpacing: "0.1em",
-    lineHeight: "1.9",
-    opacity: 0.55,
-  },
-};
+const GREEN_GLOW  = "rgba(57,255,20,0.08)";
+const BG          = "#050905";
+const RED         = "#ff4444";
+const RED_FAINT   = "rgba(255,68,68,0.12)";
+const AMBER       = "#ffb347";
+const GREY        = "rgba(57,255,20,0.30)";
+const MONO        = "'Courier New', Courier, monospace";
 
 // ---------------------------------------------------------------------------
-// Main component
+// Auth types
+// ---------------------------------------------------------------------------
+
+type AdminStatus = "loading" | "unauthenticated" | "is_admin" | "not_admin" | "error";
+
+// ---------------------------------------------------------------------------
+// Root component
 // ---------------------------------------------------------------------------
 
 export default function AdminHome() {
-  const [status, setStatus] = useState<AdminStatus>("loading");
+  const [status, setStatus]       = useState<AdminStatus>("loading");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // Match the body background to our terminal theme
   useEffect(() => {
     const prev = document.body.style.background;
     document.body.style.background = BG;
-    return () => {
-      document.body.style.background = prev;
-    };
+    return () => { document.body.style.background = prev; };
   }, []);
 
-  // On mount: check for an existing session and admin status if found
-  useEffect(() => {
-    checkSessionAndAdminStatus();
-  }, []);
+  useEffect(() => { checkSessionAndAdminStatus(); }, []);
 
   async function checkSessionAndAdminStatus() {
     setStatus("loading");
     setErrorMessage(null);
-
-    const { data: { session }, error: sessionError } =
-      await supabase.auth.getSession();
-
-    if (sessionError || !session) {
-      setStatus("unauthenticated");
-      return;
-    }
-
+    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+    if (sessionError || !session) { setStatus("unauthenticated"); return; }
     await performAdminCheck();
   }
 
   async function performAdminCheck() {
     setStatus("loading");
     setErrorMessage(null);
-
     const { data, error: rpcError } = await supabase.rpc("check_admin_status");
-
     if (rpcError) {
       console.error("check_admin_status:", rpcError.message);
-      setErrorMessage(
-        "Could not reach the server. Check your connection and try again."
-      );
+      setErrorMessage("Could not reach the server. Check your connection and try again.");
       setStatus("error");
       return;
     }
-
     const result = data as string | null;
-
-    if (result === "IS_ADMIN") {
-      setStatus("is_admin");
-    } else if (result === "NOT_ADMIN") {
-      setStatus("not_admin");
-    } else {
+    if (result === "IS_ADMIN")       setStatus("is_admin");
+    else if (result === "NOT_ADMIN") setStatus("not_admin");
+    else {
       setErrorMessage("An unexpected response was received. Please try again.");
       setStatus("error");
     }
@@ -185,57 +92,624 @@ export default function AdminHome() {
       provider: "google",
       options: { redirectTo: window.location.origin + "/admin" },
     });
-
-    if (error) {
-      console.error("Google sign-in failed:", error.message);
-    }
+    if (error) console.error("Google sign-in failed:", error.message);
   }
 
-  // ---------------------------------------------------------------------------
-  // Render
-  // ---------------------------------------------------------------------------
-
   return (
-    <div style={s.page}>
-      <div style={s.card}>
-        <div style={s.siteLabel}>
-          MEC.CONF 2026&nbsp;&nbsp;//&nbsp;&nbsp;ADMIN
+    <div style={{ background: BG, minHeight: "100svh", display: "flex", flexDirection: "column",
+                  alignItems: "center", fontFamily: MONO, color: GREEN, boxSizing: "border-box" }}>
+
+      {/* Narrow auth card for non-admin states */}
+      {status !== "is_admin" && (
+        <div style={{ width: "100%", maxWidth: "420px", padding: "32px 24px", display: "flex",
+                      flexDirection: "column", flexGrow: 1, justifyContent: "center" }}>
+          <div style={{ fontSize: "11px", letterSpacing: "0.18em", color: GREEN_DIM, marginBottom: "40px", lineHeight: "1.8" }}>
+            MEC.CONF 2026&nbsp;&nbsp;//&nbsp;&nbsp;ADMIN
+          </div>
+
+          {status === "loading"         && <LoadingView />}
+          {status === "unauthenticated" && <LoginView onSignIn={handleGoogleSignIn} />}
+          {status === "not_admin"       && <DeniedView onSignOut={handleSignOut} />}
+          {status === "error"           && (
+            <ErrorView message={errorMessage} onRetry={performAdminCheck} onSignOut={handleSignOut} />
+          )}
         </div>
+      )}
 
-        {status === "loading" && <LoadingView />}
-
-        {status === "unauthenticated" && (
-          <LoginView onSignIn={handleGoogleSignIn} />
-        )}
-
-        {status === "is_admin" && (
-          <DashboardShellView onSignOut={handleSignOut} />
-        )}
-
-        {status === "not_admin" && <DeniedView onSignOut={handleSignOut} />}
-
-        {status === "error" && (
-          <ErrorView
-            message={errorMessage}
-            onRetry={performAdminCheck}
-            onSignOut={handleSignOut}
-          />
-        )}
-      </div>
+      {/* Full-width dashboard for confirmed admins */}
+      {status === "is_admin" && (
+        <AdminDashboard onSignOut={handleSignOut} />
+      )}
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Local sub-views
+// Admin dashboard (is_admin confirmed)
 // ---------------------------------------------------------------------------
+
+function AdminDashboard({ onSignOut }: { onSignOut: () => void }) {
+  return (
+    <div style={{ width: "100%", maxWidth: "1100px", padding: "32px 24px", boxSizing: "border-box" }}>
+      {/* Header bar */}
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between",
+                    borderBottom: `1px solid ${GREEN_FAINT}`, paddingBottom: "16px", marginBottom: "40px",
+                    flexWrap: "wrap", gap: "12px" }}>
+        <div>
+          <div style={{ fontSize: "11px", letterSpacing: "0.18em", color: GREEN_DIM, marginBottom: "6px" }}>
+            MEC.CONF 2026 &nbsp;//&nbsp; ADMIN CONSOLE
+          </div>
+          <div style={{ fontSize: "22px", fontWeight: "bold", letterSpacing: "0.04em", color: GREEN }}>
+            ORGANIZER DASHBOARD
+          </div>
+        </div>
+        <button
+          id="btn-admin-sign-out"
+          type="button"
+          onClick={onSignOut}
+          style={secondaryBtnStyle}
+        >
+          [ SIGN OUT ]
+        </button>
+      </div>
+
+      {/* Roster section */}
+      <RosterSection />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Roster section — the main Phase 1 feature
+// ---------------------------------------------------------------------------
+
+function RosterSection() {
+  // ── File / CSV state ────────────────────────────────────────────────────
+  const [csv, setCsv]             = useState<ParsedCsv | null>(null);
+  const [csvError, setCsvError]   = useState<string | null>(null);
+  const [fileName, setFileName]   = useState<string | null>(null);
+  const [isParsing, setIsParsing] = useState(false);
+  const fileInputRef              = useRef<HTMLInputElement>(null);
+
+  // ── Column mapping state ─────────────────────────────────────────────────
+  const [mapping, setMapping]     = useState<FieldMapping>({ name: null, email: null, branch: null });
+
+  // ── Preview state ────────────────────────────────────────────────────────
+  const [preview, setPreview]     = useState<PreviewState>({ status: "idle" });
+  const [isPreviewing, setIsPreviewing] = useState(false);
+  // Keep the payload that generated the current preview for email display
+  const [previewPayload, setPreviewPayload] = useState<RosterPayloadRow[]>([]);
+
+  // Reset all derived state whenever the CSV changes
+  function resetToFile() {
+    setCsv(null);
+    setCsvError(null);
+    setFileName(null);
+    setMapping({ name: null, email: null, branch: null });
+    setPreview({ status: "idle" });
+    setPreviewPayload([]);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
+  // ── File selection handler ───────────────────────────────────────────────
+  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Clear previous results immediately when a new file is chosen
+    setCsv(null);
+    setCsvError(null);
+    setMapping({ name: null, email: null, branch: null });
+    setPreview({ status: "idle" });
+    setPreviewPayload([]);
+    setFileName(file.name);
+    setIsParsing(true);
+
+    const result = await parseCsvFile(file);
+    setIsParsing(false);
+
+    if ("error" in result) {
+      setCsvError(result.error.message);
+      return;
+    }
+
+    const detected = autoDetectMapping(result.csv.headers);
+    setCsv(result.csv);
+    setMapping(detected);
+  }
+
+  // Updating a single mapping field clears any stale preview
+  function updateMapping(field: RequiredField, colIdx: number | null) {
+    setMapping((prev) => ({ ...prev, [field]: colIdx }));
+    setPreview({ status: "idle" }); // stale preview cleared
+    setPreviewPayload([]);
+  }
+
+  // ── Preview RPC ──────────────────────────────────────────────────────────
+  async function handleRequestPreview() {
+    if (!csv || !isMappingComplete(mapping)) return;
+    if (getMappingConflicts(mapping).length > 0) return;
+
+    const payload = buildPayload(csv, mapping);
+
+    if (payload.length === 0) {
+      setPreview({ status: "error", message: "No data rows found after filtering blank rows." });
+      return;
+    }
+
+    setIsPreviewing(true);
+    setPreview({ status: "loading" });
+    setPreviewPayload(payload);
+
+    const { data, error } = await supabase.rpc("admin_preview_roster", { payload });
+
+    setIsPreviewing(false);
+
+    if (error) {
+      console.error("admin_preview_roster:", error.message);
+      const isPermission = error.message.toLowerCase().includes("permission");
+      setPreview({
+        status: "error",
+        message: isPermission
+          ? "Access denied. Your account does not have organizer privileges."
+          : "Preview request failed. Check your connection and try again.",
+      });
+      return;
+    }
+
+    // Narrow the RPC response
+    if (!Array.isArray(data)) {
+      setPreview({ status: "error", message: "Unexpected response from server." });
+      return;
+    }
+
+    // Validate each row has required shape
+    const rows: PreviewResultRow[] = [];
+    for (const item of data as unknown[]) {
+      if (typeof item !== "object" || item === null) continue;
+      const r = item as Record<string, unknown>;
+      rows.push({
+        row_number:        typeof r.row_number === "number" ? r.row_number : 0,
+        category:          (r.category as PreviewCategory) ?? "CONFLICT",
+        is_blocking:       Boolean(r.is_blocking),
+        is_suspicious_email: Boolean(r.is_suspicious_email),
+        csv_name:          typeof r.csv_name === "string" ? r.csv_name : null,
+        csv_branch:        typeof r.csv_branch === "string" ? r.csv_branch : null,
+        db_name:           typeof r.db_name === "string" ? r.db_name : null,
+        db_branch:         typeof r.db_branch === "string" ? r.db_branch : null,
+      });
+    }
+
+    setPreview({ status: "success", rows });
+  }
+
+  // ── Computed summary counts ──────────────────────────────────────────────
+  const mappingConflicts = getMappingConflicts(mapping);
+  const mappingReady     = isMappingComplete(mapping) && mappingConflicts.length === 0;
+
+  return (
+    <section aria-labelledby="roster-section-heading">
+      <h2 id="roster-section-heading" style={{ fontSize: "13px", letterSpacing: "0.16em",
+          color: GREEN_DIM, marginBottom: "28px", fontWeight: "normal" }}>
+        &gt;&gt; SECTION: ROSTER_MANAGEMENT
+      </h2>
+
+      {/* ── Step 1: File upload ── */}
+      <SectionBlock label="01  UPLOAD REGISTRATION CSV">
+        <div style={{ display: "flex", alignItems: "center", gap: "16px", flexWrap: "wrap" }}>
+          <label htmlFor="csv-file-input" style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+            <span style={{ fontSize: "12px", color: GREEN_DIM, letterSpacing: "0.08em" }}>
+              Select a .csv file exported from Google Forms / Sheets:
+            </span>
+            <input
+              id="csv-file-input"
+              ref={fileInputRef}
+              type="file"
+              accept=".csv,text/csv"
+              onChange={handleFileChange}
+              disabled={isParsing}
+              style={{
+                fontFamily: MONO, fontSize: "13px", color: GREEN,
+                background: GREEN_GLOW, border: `1px solid ${GREY}`,
+                padding: "10px 14px", cursor: "pointer", outline: "none",
+                letterSpacing: "0.04em",
+              }}
+            />
+          </label>
+          {(csv || csvError) && (
+            <button type="button" onClick={resetToFile} style={{ ...secondaryBtnStyle, width: "auto", padding: "10px 18px" }}>
+              [ CLEAR / RESET ]
+            </button>
+          )}
+        </div>
+
+        {isParsing && <StatusLine text="Parsing CSV..." />}
+
+        {csvError && (
+          <ErrorBox message={csvError} />
+        )}
+
+        {csv && !csvError && (
+          <div style={{ marginTop: "14px", fontSize: "13px", color: GREEN_DIM, lineHeight: "1.8" }}>
+            <span style={{ color: GREEN }}>✓</span>&nbsp;
+            <strong style={{ color: GREEN }}>{fileName}</strong>
+            &nbsp;— {csv.headers.length} columns, {csv.rows.length} data rows detected.
+          </div>
+        )}
+      </SectionBlock>
+
+      {/* ── Step 2: Column mapping ── */}
+      {csv && (
+        <SectionBlock label="02  MAP COLUMNS">
+          <p style={{ fontSize: "13px", color: GREEN_DIM, marginBottom: "20px", lineHeight: "1.7" }}>
+            Map each required field to the correct CSV column.
+            Auto-detection is conservative — confirm or correct below.
+          </p>
+          <MappingForm
+            headers={csv.headers}
+            mapping={mapping}
+            conflicts={mappingConflicts}
+            onUpdate={updateMapping}
+          />
+          {mappingConflicts.length > 0 && (
+            <ErrorBox message="Two or more fields are mapped to the same CSV column. Each field must use a unique column." />
+          )}
+          {mappingReady && (
+            <div style={{ marginTop: "14px", fontSize: "12px", color: GREEN_DIM }}>
+              <span style={{ color: GREEN }}>✓</span>&nbsp;All required fields are mapped. Ready to preview.
+            </div>
+          )}
+        </SectionBlock>
+      )}
+
+      {/* ── Step 3: Request preview ── */}
+      {csv && mappingReady && (
+        <SectionBlock label="03  SERVER PREVIEW">
+          <p style={{ fontSize: "13px", color: GREEN_DIM, marginBottom: "20px", lineHeight: "1.7" }}>
+            Send the parsed data to the server for authoritative classification.
+            No participants will be changed at this step.
+          </p>
+          <button
+            id="btn-request-preview"
+            type="button"
+            onClick={handleRequestPreview}
+            disabled={isPreviewing || preview.status === "loading"}
+            style={{ ...primaryBtnStyle, width: "auto", padding: "14px 28px" }}
+          >
+            {isPreviewing ? "[ REQUESTING PREVIEW... ]" : "[ REQUEST SERVER PREVIEW ]"}
+          </button>
+        </SectionBlock>
+      )}
+
+      {/* ── Preview results ── */}
+      {preview.status === "loading" && (
+        <SectionBlock label="04  PREVIEW RESULTS">
+          <StatusLine text="Contacting server..." />
+        </SectionBlock>
+      )}
+
+      {preview.status === "error" && (
+        <SectionBlock label="04  PREVIEW RESULTS">
+          <ErrorBox message={preview.message} />
+        </SectionBlock>
+      )}
+
+      {preview.status === "success" && (
+        <SectionBlock label="04  PREVIEW RESULTS">
+          <PreviewResults rows={preview.rows} payloadMap={Object.fromEntries(previewPayload.map(r => [r.row_number, r]))} />
+        </SectionBlock>
+      )}
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Column mapping form
+// ---------------------------------------------------------------------------
+
+const FIELD_LABELS: Record<RequiredField, string> = {
+  name:   "Participant Name",
+  email:  "Email Address",
+  branch: "Branch / Department",
+};
+
+function MappingForm({
+  headers,
+  mapping,
+  conflicts,
+  onUpdate,
+}: {
+  headers: string[];
+  mapping: FieldMapping;
+  conflicts: RequiredField[];
+  onUpdate: (field: RequiredField, idx: number | null) => void;
+}) {
+  const id = useId();
+
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: "16px" }}>
+      {(["name", "email", "branch"] as RequiredField[]).map((field) => {
+        const isConflict = conflicts.includes(field);
+        const selectedIdx = mapping[field];
+        return (
+          <div key={field}>
+            <label
+              htmlFor={`${id}-${field}`}
+              style={{ display: "block", fontSize: "12px", color: isConflict ? RED : GREEN_DIM,
+                       letterSpacing: "0.08em", marginBottom: "6px" }}
+            >
+              {FIELD_LABELS[field]} {selectedIdx === null && <span style={{ color: AMBER }}>← required</span>}
+            </label>
+            <select
+              id={`${id}-${field}`}
+              value={selectedIdx ?? ""}
+              onChange={(e) => {
+                const v = e.target.value;
+                onUpdate(field, v === "" ? null : parseInt(v, 10));
+              }}
+              style={{
+                width: "100%", fontFamily: MONO, fontSize: "13px",
+                background: isConflict ? RED_FAINT : GREEN_GLOW,
+                color: isConflict ? RED : GREEN,
+                border: `1px solid ${isConflict ? RED : GREY}`,
+                padding: "10px 12px", outline: "none",
+                appearance: "auto",
+              }}
+            >
+              <option value="">— select column —</option>
+              {headers.map((h, idx) => (
+                <option key={idx} value={idx}>{h || `(blank column ${idx + 1})`}</option>
+              ))}
+            </select>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Preview results component
+// ---------------------------------------------------------------------------
+
+function PreviewResults({ rows, payloadMap }: { rows: PreviewResultRow[]; payloadMap: Record<number, RosterPayloadRow> }) {
+  // Summary counts
+  const counts = {
+    total:        rows.length,
+    new_:         rows.filter((r) => r.category === "NEW").length,
+    updates:      rows.filter((r) => r.category === "DETAILS_UPDATE").length,
+    active:       rows.filter((r) => r.category === "ALREADY_ACTIVE").length,
+    unchanged:    rows.filter((r) => r.category === "UNCHANGED").length,
+    problems:     rows.filter((r) => r.is_blocking).length,
+    warnings:     rows.filter((r) => r.is_suspicious_email && !r.is_blocking).length,
+  };
+
+  const hasBlocking = counts.problems > 0;
+
+  return (
+    <div>
+      {/* aria-live region for screen readers */}
+      <div aria-live="polite" aria-atomic="true" style={{ position: "absolute", left: "-9999px" }}>
+        Preview complete. {counts.total} rows: {counts.new_} new, {counts.problems} problems.
+      </div>
+
+      {/* Summary bar */}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "12px", marginBottom: "24px" }}>
+        <SummaryChip label="TOTAL"    value={counts.total}    color={GREEN} />
+        <SummaryChip label="NEW"      value={counts.new_}     color={GREEN} />
+        <SummaryChip label="UPDATES"  value={counts.updates}  color={AMBER} />
+        <SummaryChip label="ACTIVE"   value={counts.active}   color={GREEN_DIM} />
+        <SummaryChip label="UNCHANGED" value={counts.unchanged} color={GREEN_DIM} />
+        <SummaryChip label="PROBLEMS" value={counts.problems} color={counts.problems > 0 ? RED : GREEN_DIM} />
+        <SummaryChip label="WARNINGS" value={counts.warnings} color={counts.warnings > 0 ? AMBER : GREEN_DIM} />
+      </div>
+
+      {hasBlocking && (
+        <div role="alert" style={{ background: RED_FAINT, border: `1px solid ${RED}`, padding: "12px 16px",
+                                   fontSize: "13px", color: RED, marginBottom: "20px", lineHeight: "1.7",
+                                   letterSpacing: "0.04em" }}>
+          ⚠ {counts.problems} row{counts.problems !== 1 ? "s" : ""} must be fixed in the source CSV before import can proceed.
+          Fix the issues and re-upload the file.
+        </div>
+      )}
+
+      {/* Row table */}
+      <div style={{ overflowX: "auto" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px", letterSpacing: "0.02em" }}>
+          <thead>
+            <tr style={{ borderBottom: `1px solid ${GREEN_FAINT}` }}>
+              {["Row", "Name", "Branch", "Email", "Status", "Details"].map((col) => (
+                <th key={col} style={{ textAlign: "left", padding: "8px 12px", color: GREEN_DIM,
+                                       fontWeight: "normal", fontSize: "11px", letterSpacing: "0.12em",
+                                       whiteSpace: "nowrap" }}>
+                  {col.toUpperCase()}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <PreviewRow key={row.row_number} row={row} payloadRow={payloadMap[row.row_number]} />
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function SummaryChip({ label, value, color }: { label: string; value: number; color: string }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center",
+                  border: `1px solid ${color === GREEN ? GREEN_FAINT : "rgba(255,179,71,0.25)"}`,
+                  padding: "10px 16px", minWidth: "80px", background: GREEN_GLOW }}>
+      <span style={{ fontSize: "22px", fontWeight: "bold", color, lineHeight: 1 }}>{value}</span>
+      <span style={{ fontSize: "10px", color: GREEN_DIM, letterSpacing: "0.12em", marginTop: "4px" }}>{label}</span>
+    </div>
+  );
+}
+
+// Human-readable category labels
+const CATEGORY_LABELS: Record<PreviewCategory, string> = {
+  NEW:                   "New participant",
+  UNCHANGED:             "Already in roster",
+  DETAILS_UPDATE:        "Details will be updated",
+  ALREADY_ACTIVE:        "Already active",
+  DUPLICATE_IN_FILE:     "Duplicate email",
+  INVALID_EMAIL:         "Invalid email",
+  MISSING_REQUIRED_FIELD:"Missing information",
+  CONFLICT:              "Cannot process",
+};
+
+function categoryColor(cat: PreviewCategory, isBlocking: boolean): string {
+  if (isBlocking) return RED;
+  if (cat === "NEW")            return GREEN;
+  if (cat === "DETAILS_UPDATE") return AMBER;
+  if (cat === "ALREADY_ACTIVE" || cat === "UNCHANGED") return GREEN_DIM;
+  return GREEN_DIM;
+}
+
+function PreviewRow({ row, payloadRow }: { row: PreviewResultRow; payloadRow?: RosterPayloadRow }) {
+  const rowBg  = row.is_blocking ? RED_FAINT : "transparent";
+  const catCol = categoryColor(row.category, row.is_blocking);
+
+  const displayName = row.csv_name || payloadRow?.name || "";
+  const displayBranch = row.csv_branch || payloadRow?.branch || "";
+  const displayEmail = payloadRow?.email || "";
+
+  // Build details cell content
+  const detailParts: string[] = [];
+
+  if (row.category === "DETAILS_UPDATE") {
+    if (row.db_name && displayName && row.db_name !== displayName) {
+      detailParts.push(`Name: ${row.db_name} → ${displayName}`);
+    }
+    if (row.db_branch !== undefined && displayBranch !== undefined && row.db_branch !== displayBranch) {
+      detailParts.push(`Branch: ${row.db_branch ?? "—"} → ${displayBranch ?? "—"}`);
+    }
+  }
+
+  return (
+    <tr style={{ background: rowBg, borderBottom: `1px solid ${GREEN_FAINT}` }}>
+      {/* Row number */}
+      <td style={{ padding: "10px 12px", color: GREEN_DIM, whiteSpace: "nowrap" }}>
+        {row.row_number}
+      </td>
+
+      {/* Name */}
+      <td style={{ padding: "10px 12px", color: GREEN, maxWidth: "200px", wordBreak: "break-word" }}>
+        {displayName || <span style={{ color: RED }}>—</span>}
+      </td>
+
+      {/* Branch */}
+      <td style={{ padding: "10px 12px", color: GREEN, whiteSpace: "nowrap" }}>
+        {displayBranch || <span style={{ color: RED }}>—</span>}
+      </td>
+
+      {/* Email */}
+      <td style={{ padding: "10px 12px", color: GREEN, maxWidth: "220px", wordBreak: "break-word" }}>
+        <span style={row.is_suspicious_email ? { color: AMBER } : {}}>
+          {displayEmail || <span style={{ color: RED }}>—</span>}
+        </span>
+      </td>
+
+      {/* Status */}
+      <td style={{ padding: "10px 12px", whiteSpace: "nowrap" }}>
+        <span style={{ color: catCol, fontWeight: row.is_blocking ? "bold" : "normal" }}>
+          {CATEGORY_LABELS[row.category]}
+        </span>
+        {row.is_suspicious_email && (
+          <span style={{ display: "block", color: AMBER, fontSize: "11px", marginTop: "3px" }}>
+            ⚠ Check email
+          </span>
+        )}
+      </td>
+
+      {/* Details */}
+      <td style={{ padding: "10px 12px", color: GREEN_DIM, fontSize: "12px", maxWidth: "260px" }}>
+        {detailParts.length > 0
+          ? detailParts.map((d, i) => <div key={i}>{d}</div>)
+          : null
+        }
+      </td>
+    </tr>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Layout helpers
+// ---------------------------------------------------------------------------
+
+function SectionBlock({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div style={{ border: `1px solid ${GREEN_FAINT}`, padding: "24px", marginBottom: "24px",
+                  background: GREEN_GLOW }}>
+      <div style={{ fontSize: "11px", letterSpacing: "0.16em", color: GREEN_DIM,
+                    marginBottom: "20px", fontWeight: "bold" }}>
+        {label}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function StatusLine({ text }: { text: string }) {
+  return (
+    <div style={{ fontSize: "13px", color: GREEN_DIM, letterSpacing: "0.06em", padding: "4px 0" }}>
+      &gt;&gt; {text}
+    </div>
+  );
+}
+
+function ErrorBox({ message }: { message: string }) {
+  return (
+    <div role="alert" style={{ background: RED_FAINT, border: `1px solid ${RED}`, padding: "12px 16px",
+                               fontSize: "13px", color: RED, marginTop: "14px", lineHeight: "1.7",
+                               letterSpacing: "0.02em" }}>
+      ✕ {message}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Auth sub-views (unchanged from original)
+// ---------------------------------------------------------------------------
+
+const primaryBtnStyle: React.CSSProperties = {
+  display: "flex", alignItems: "center", justifyContent: "center", gap: "10px",
+  width: "100%", padding: "16px 24px", background: GREEN, color: BG, border: "none",
+  fontFamily: MONO, fontSize: "13px", fontWeight: "bold", letterSpacing: "0.14em",
+  cursor: "pointer", marginBottom: "14px", boxShadow: `0 0 18px ${GREEN_FAINT}`,
+};
+
+const secondaryBtnStyle: React.CSSProperties = {
+  display: "flex", alignItems: "center", justifyContent: "center", width: "100%",
+  padding: "14px 24px", background: "transparent", color: GREEN,
+  border: `1px solid ${GREEN}`, fontFamily: MONO, fontSize: "13px",
+  fontWeight: "bold", letterSpacing: "0.14em", cursor: "pointer", opacity: 0.75,
+};
+
+const statusBarStyle: React.CSSProperties = {
+  marginTop: "48px", paddingTop: "16px", borderTop: `1px solid ${GREEN_FAINT}`,
+  fontSize: "10px", color: GREEN_DIM, letterSpacing: "0.1em", lineHeight: "1.9", opacity: 0.55,
+};
+
+const headingStyle: React.CSSProperties = {
+  fontSize: "clamp(38px,11vw,54px)", fontWeight: "bold", color: GREEN, lineHeight: "1.0",
+  letterSpacing: "-0.01em", margin: "0 0 20px", textShadow: `0 0 28px ${GREEN_DIM}`,
+  fontFamily: MONO,
+};
+
+const subtextStyle: React.CSSProperties = {
+  fontSize: "14px", color: GREEN_DIM, lineHeight: "1.8", margin: "0 0 40px", letterSpacing: "0.02em",
+};
 
 function LoadingView() {
   return (
     <>
-      <h1 style={s.heading}>STAND BY.</h1>
-      <p style={s.subtext}>Establishing secure connection...</p>
-      <div style={s.statusBar}>
+      <h1 style={headingStyle}>STAND BY.</h1>
+      <p style={subtextStyle}>Establishing secure connection...</p>
+      <div style={statusBarStyle}>
         <div>&gt;&gt; CHECKING_SESSION...</div>
         <div>&gt;&gt; PLEASE_WAIT.</div>
       </div>
@@ -246,23 +720,15 @@ function LoadingView() {
 function LoginView({ onSignIn }: { onSignIn: () => void }) {
   return (
     <>
-      <h1 style={s.heading}>SYSTEM{"\n"}ACCESS.</h1>
-      <p style={s.subtext}>
-        Organizer console authentication required.
-        <br />
+      <h1 style={headingStyle}>SYSTEM{"\n"}ACCESS.</h1>
+      <p style={subtextStyle}>
+        Organizer console authentication required.<br />
         Unauthorized access is prohibited.
       </p>
-
-      <button
-        id="btn-admin-google-signin"
-        type="button"
-        style={s.primaryBtn}
-        onClick={onSignIn}
-      >
+      <button id="btn-admin-google-signin" type="button" style={primaryBtnStyle} onClick={onSignIn}>
         <GoogleIcon />[ CONTINUE WITH GOOGLE ]
       </button>
-
-      <div style={s.statusBar}>
+      <div style={statusBarStyle}>
         <div>&gt;&gt; AUTHENTICATION_REQUIRED...</div>
         <div>&gt;&gt; INITIATING_SECURE_LOGIN...</div>
         <div>&gt;&gt; STANDBY.</div>
@@ -271,51 +737,15 @@ function LoginView({ onSignIn }: { onSignIn: () => void }) {
   );
 }
 
-function DashboardShellView({ onSignOut }: { onSignOut: () => void }) {
-  return (
-    <>
-      <h1 style={s.heading}>ADMIN ACCESS{"\n"}CONFIRMED.</h1>
-      <p style={s.subtext}>
-        Organizer console.
-        <br />
-        Roster management coming next.
-      </p>
-
-      <button
-        id="btn-admin-sign-out"
-        type="button"
-        style={s.secondaryBtn}
-        onClick={onSignOut}
-      >
-        [ SIGN OUT ]
-      </button>
-
-      <div style={s.statusBar}>
-        <div>&gt;&gt; SYSTEM_ONLINE...</div>
-        <div>&gt;&gt; WAITING_FOR_COMMANDS.</div>
-      </div>
-    </>
-  );
-}
-
 function DeniedView({ onSignOut }: { onSignOut: () => void }) {
   return (
     <>
-      <h1 style={s.heading}>ACCESS{"\n"}DENIED.</h1>
-      <p style={s.subtext}>
-        Your account does not have administrator privileges.
-      </p>
-
-      <button
-        id="btn-admin-denied-sign-out"
-        type="button"
-        style={s.secondaryBtn}
-        onClick={onSignOut}
-      >
+      <h1 style={headingStyle}>ACCESS{"\n"}DENIED.</h1>
+      <p style={subtextStyle}>Your account does not have administrator privileges.</p>
+      <button id="btn-admin-denied-sign-out" type="button" style={secondaryBtnStyle} onClick={onSignOut}>
         [ SIGN OUT ]
       </button>
-
-      <div style={s.statusBar}>
+      <div style={statusBarStyle}>
         <div>&gt;&gt; INSUFFICIENT_PRIVILEGES...</div>
         <div>&gt;&gt; ACCESS_DENIED.</div>
       </div>
@@ -324,40 +754,15 @@ function DeniedView({ onSignOut }: { onSignOut: () => void }) {
 }
 
 function ErrorView({
-  message,
-  onRetry,
-  onSignOut,
-}: {
-  message: string | null;
-  onRetry: () => void;
-  onSignOut: () => void;
-}) {
+  message, onRetry, onSignOut,
+}: { message: string | null; onRetry: () => void; onSignOut: () => void }) {
   return (
     <>
-      <h1 style={s.heading}>TRANSMISSION{"\n"}FAILED.</h1>
-      <p style={s.subtext}>
-        {message ?? "An unexpected error occurred. Please try again."}
-      </p>
-
-      <button
-        id="btn-admin-error-retry"
-        type="button"
-        style={s.primaryBtn}
-        onClick={onRetry}
-      >
-        [ TRY AGAIN ]
-      </button>
-
-      <button
-        id="btn-admin-error-sign-out"
-        type="button"
-        style={s.secondaryBtn}
-        onClick={onSignOut}
-      >
-        [ SIGN OUT ]
-      </button>
-
-      <div style={s.statusBar}>
+      <h1 style={headingStyle}>TRANSMISSION{"\n"}FAILED.</h1>
+      <p style={subtextStyle}>{message ?? "An unexpected error occurred. Please try again."}</p>
+      <button id="btn-admin-error-retry"    type="button" style={primaryBtnStyle}    onClick={onRetry}>[ TRY AGAIN ]</button>
+      <button id="btn-admin-error-sign-out" type="button" style={secondaryBtnStyle}  onClick={onSignOut}>[ SIGN OUT ]</button>
+      <div style={statusBarStyle}>
         <div>&gt;&gt; CONNECTION_FAILED...</div>
         <div>&gt;&gt; RETRY_OR_SIGN_OUT.</div>
       </div>
@@ -365,20 +770,9 @@ function ErrorView({
   );
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 function GoogleIcon() {
   return (
-    <svg
-      width="17"
-      height="17"
-      viewBox="0 0 24 24"
-      fill={BG}
-      aria-hidden="true"
-      style={{ flexShrink: 0 }}
-    >
+    <svg width="17" height="17" viewBox="0 0 24 24" fill={BG} aria-hidden="true" style={{ flexShrink: 0 }}>
       <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
       <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
       <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z" />
