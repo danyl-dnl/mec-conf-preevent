@@ -1,0 +1,6 @@
+project_id = "mec-conf"
+
+[functions.upload-pair-photo]
+# The handler validates the bearer token against Supabase Auth before any work.
+# This supports both legacy and asymmetric project JWT signing keys.
+verify_jwt = false
