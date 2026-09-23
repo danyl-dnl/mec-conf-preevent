@@ -17,6 +17,9 @@ import type {
   RosterPayloadRow,
   AdminParticipantRow,
   ImportResult,
+  UnpairedParticipant,
+  AdminPairRow,
+  CreatePairResult,
 } from "./rosterTypes";
 
 // ---------------------------------------------------------------------------
@@ -198,6 +201,8 @@ function AdminDashboard({ onSignOut }: { onSignOut: () => void }) {
       <RosterSection onImportSuccess={fetchRoster} />
 
       <AdminRosterList roster={roster} isLoading={isRosterLoading} error={rosterError} onRefresh={fetchRoster} />
+
+      <PairSection />
     </div>
   );
 }
@@ -1128,6 +1133,399 @@ function AdminRosterList({
             </tbody>
           </table>
         </div>
+      </SectionBlock>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Pair Section
+// ---------------------------------------------------------------------------
+
+function validateUnpairedParticipant(item: unknown): UnpairedParticipant | null {
+  if (typeof item !== "object" || item === null) return null;
+  const r = item as Record<string, unknown>;
+  if (typeof r.participant_code !== "string") return null;
+  if (typeof r.name !== "string") return null;
+  if (r.branch !== null && typeof r.branch !== "string") return null;
+  if (typeof r.registered_email !== "string") return null;
+  if (typeof r.is_linked !== "boolean") return null;
+  return {
+    participant_code: r.participant_code,
+    name: r.name,
+    branch: r.branch ?? null,
+    registered_email: r.registered_email,
+    is_linked: r.is_linked,
+  };
+}
+
+function validateAdminPairRow(item: unknown): AdminPairRow | null {
+  if (typeof item !== "object" || item === null) return null;
+  const r = item as Record<string, unknown>;
+  if (typeof r.pair_code !== "string") return null;
+  if (typeof r.member_a_code !== "string") return null;
+  if (typeof r.member_a_name !== "string") return null;
+  if (r.member_a_branch !== null && typeof r.member_a_branch !== "string") return null;
+  if (typeof r.member_b_code !== "string") return null;
+  if (typeof r.member_b_name !== "string") return null;
+  if (r.member_b_branch !== null && typeof r.member_b_branch !== "string") return null;
+  return {
+    pair_code: r.pair_code,
+    member_a_code: r.member_a_code,
+    member_a_name: r.member_a_name,
+    member_a_branch: r.member_a_branch ?? null,
+    member_b_code: r.member_b_code,
+    member_b_name: r.member_b_name,
+    member_b_branch: r.member_b_branch ?? null,
+  };
+}
+
+function validateCreatePairResult(data: unknown): CreatePairResult | null {
+  if (typeof data !== "object" || data === null) return null;
+  const r = data as Record<string, unknown>;
+  if (r.success !== true) return null;
+  if (typeof r.pair_code !== "string") return null;
+  const va = r.member_a as Record<string, unknown> | null;
+  const vb = r.member_b as Record<string, unknown> | null;
+  if (!va || typeof va.participant_code !== "string" || typeof va.name !== "string") return null;
+  if (!vb || typeof vb.participant_code !== "string" || typeof vb.name !== "string") return null;
+  return {
+    success: true,
+    pair_code: r.pair_code,
+    member_a: {
+      participant_code: va.participant_code,
+      name: va.name,
+      branch: typeof va.branch === "string" ? va.branch : null,
+    },
+    member_b: {
+      participant_code: vb.participant_code,
+      name: vb.name,
+      branch: typeof vb.branch === "string" ? vb.branch : null,
+    },
+  };
+}
+
+function participantLabel(p: UnpairedParticipant): string {
+  return `${p.participant_code} — ${p.name} — ${p.branch ?? "—"}`;
+}
+
+function PairSection() {
+  const [unpaired, setUnpaired] = useState<UnpairedParticipant[] | null>(null);
+  const [pairs, setPairs] = useState<AdminPairRow[] | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  const [selectedA, setSelectedA] = useState<string>("");
+  const [selectedB, setSelectedB] = useState<string>("");
+
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [isCreating, setIsCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [lastCreated, setLastCreated] = useState<CreatePairResult | null>(null);
+
+  useEffect(() => { fetchPairState(); }, []);
+
+  async function fetchPairState() {
+    setIsLoading(true);
+    setLoadError(null);
+
+    const [{ data: uData, error: uErr }, { data: pData, error: pErr }] = await Promise.all([
+      supabase.rpc("admin_list_unpaired_participants"),
+      supabase.rpc("admin_list_pairs"),
+    ]);
+
+    setIsLoading(false);
+
+    if (uErr || pErr) {
+      setLoadError("Failed to load pair state. Check your connection and try again.");
+      return;
+    }
+
+    if (!Array.isArray(uData) || !Array.isArray(pData)) {
+      setLoadError("Unexpected response from server.");
+      return;
+    }
+
+    const validUnpaired: UnpairedParticipant[] = [];
+    for (const item of uData) {
+      const v = validateUnpairedParticipant(item);
+      if (v) validUnpaired.push(v);
+    }
+
+    const validPairs: AdminPairRow[] = [];
+    for (const item of pData) {
+      const v = validateAdminPairRow(item);
+      if (v) validPairs.push(v);
+    }
+
+    setUnpaired(validUnpaired);
+    setPairs(validPairs);
+  }
+
+  async function handleCreatePair() {
+    if (!selectedA || !selectedB || selectedA === selectedB || isCreating) return;
+    setIsCreating(true);
+    setCreateError(null);
+
+    const { data, error } = await supabase.rpc("admin_create_pair", {
+      participant_code_a: selectedA,
+      participant_code_b: selectedB,
+    });
+
+    setIsCreating(false);
+    setShowConfirm(false);
+
+    if (error) {
+      console.error(error);
+      const msg = error.message?.toLowerCase() ?? "";
+      if (msg.includes("already paired")) {
+        setCreateError("One or both participants are already paired. The roster may have changed — please choose again.");
+      } else if (msg.includes("unknown participant")) {
+        setCreateError("One of the participant codes is no longer valid. Refresh and choose again.");
+      } else if (msg.includes("permission")) {
+        setCreateError("Access denied. Only organizers can create pairs.");
+      } else {
+        setCreateError("Pair creation failed. No participants were changed. Refresh and try again.");
+      }
+      // Refresh state to reflect any server-side changes
+      setSelectedA("");
+      setSelectedB("");
+      fetchPairState();
+      return;
+    }
+
+    const result = validateCreatePairResult(data);
+    if (!result) {
+      setCreateError("Unexpected response from server. Refresh the pair list to verify state before retrying.");
+      setSelectedA("");
+      setSelectedB("");
+      fetchPairState();
+      return;
+    }
+
+    setLastCreated(result);
+    setSelectedA("");
+    setSelectedB("");
+    fetchPairState();
+  }
+
+  const canCreate = selectedA !== "" && selectedB !== "" && selectedA !== selectedB && !isCreating;
+
+  const participantA = unpaired?.find(p => p.participant_code === selectedA) ?? null;
+  const participantB = unpaired?.find(p => p.participant_code === selectedB) ?? null;
+
+  return (
+    <section aria-labelledby="pair-section-heading" style={{ marginTop: "48px" }}>
+      <h2 id="pair-section-heading" style={{ fontSize: "13px", letterSpacing: "0.16em",
+          color: GREEN_DIM, marginBottom: "28px", fontWeight: "normal" }}>
+        &gt;&gt; SECTION: PAIR_ASSIGNMENT
+      </h2>
+
+      <SectionBlock label="06  PAIR ASSIGNMENT">
+        {/* Summary */}
+        <div style={{ display: "flex", gap: "24px", marginBottom: "24px", flexWrap: "wrap" }}>
+          <div style={{ fontSize: "13px", color: GREEN_DIM }}>
+            Unpaired participants:{" "}
+            <span style={{ color: GREEN, fontWeight: "bold" }}>
+              {unpaired === null ? "—" : unpaired.length}
+            </span>
+          </div>
+          <div style={{ fontSize: "13px", color: GREEN_DIM }}>
+            Created pairs:{" "}
+            <span style={{ color: GREEN, fontWeight: "bold" }}>
+              {pairs === null ? "—" : pairs.length}
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={fetchPairState}
+            disabled={isLoading}
+            style={{ ...secondaryBtnStyle, width: "auto", padding: "6px 14px", fontSize: "11px", margin: 0 }}
+          >
+            {isLoading ? "[ REFRESHING... ]" : "[ REFRESH ]"}
+          </button>
+        </div>
+
+        {loadError && <ErrorBox message={loadError} />}
+
+        {/* Last created success message */}
+        {lastCreated && (
+          <div style={{ padding: "16px", border: `1px solid ${GREEN}`, marginBottom: "24px",
+                        background: GREEN_GLOW, fontSize: "13px", lineHeight: "1.8" }}>
+            <div style={{ color: GREEN, fontWeight: "bold", marginBottom: "8px" }}>
+              {lastCreated.pair_code} CREATED
+            </div>
+            <div style={{ color: GREEN_DIM }}>
+              Fragment A — {lastCreated.member_a.participant_code} — {lastCreated.member_a.name} — {lastCreated.member_a.branch ?? "—"}
+            </div>
+            <div style={{ color: GREEN_DIM }}>
+              Fragment B — {lastCreated.member_b.participant_code} — {lastCreated.member_b.name} — {lastCreated.member_b.branch ?? "—"}
+            </div>
+          </div>
+        )}
+
+        {/* Participant selectors */}
+        {unpaired !== null && (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: "20px", marginBottom: "24px" }}>
+            {/* Fragment A */}
+            <label style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+              <span style={{ fontSize: "11px", color: GREEN_DIM, letterSpacing: "0.08em" }}>
+                FRAGMENT A PARTICIPANT
+              </span>
+              <select
+                id="pair-select-a"
+                value={selectedA}
+                onChange={e => { setSelectedA(e.target.value); setShowConfirm(false); setLastCreated(null); setCreateError(null); }}
+                disabled={isCreating}
+                style={{
+                  fontFamily: MONO, fontSize: "13px", color: GREEN,
+                  background: BG, border: `1px solid ${GREY}`,
+                  padding: "10px 12px", outline: "none", appearance: "auto",
+                }}
+              >
+                <option value="">— select participant —</option>
+                {unpaired
+                  .filter(p => p.participant_code !== selectedB)
+                  .map(p => (
+                    <option key={p.participant_code} value={p.participant_code}>
+                      {participantLabel(p)}
+                    </option>
+                  ))}
+              </select>
+            </label>
+
+            {/* Fragment B */}
+            <label style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+              <span style={{ fontSize: "11px", color: GREEN_DIM, letterSpacing: "0.08em" }}>
+                FRAGMENT B PARTICIPANT
+              </span>
+              <select
+                id="pair-select-b"
+                value={selectedB}
+                onChange={e => { setSelectedB(e.target.value); setShowConfirm(false); setLastCreated(null); setCreateError(null); }}
+                disabled={isCreating}
+                style={{
+                  fontFamily: MONO, fontSize: "13px", color: GREEN,
+                  background: BG, border: `1px solid ${GREY}`,
+                  padding: "10px 12px", outline: "none", appearance: "auto",
+                }}
+              >
+                <option value="">— select participant —</option>
+                {unpaired
+                  .filter(p => p.participant_code !== selectedA)
+                  .map(p => (
+                    <option key={p.participant_code} value={p.participant_code}>
+                      {participantLabel(p)}
+                    </option>
+                  ))}
+              </select>
+            </label>
+          </div>
+        )}
+
+        {unpaired !== null && unpaired.length < 2 && (
+          <div style={{ fontSize: "12px", color: GREEN_DIM, marginBottom: "20px" }}>
+            At least 2 unpaired participants are required to create a pair.
+          </div>
+        )}
+
+        {createError && <ErrorBox message={createError} />}
+
+        {/* Create button / confirmation */}
+        {!showConfirm ? (
+          <div style={{ display: "flex", alignItems: "center", gap: "16px", flexWrap: "wrap" }}>
+            <button
+              id="btn-create-pair"
+              type="button"
+              onClick={() => { setShowConfirm(true); setLastCreated(null); setCreateError(null); }}
+              disabled={!canCreate}
+              style={{
+                ...(canCreate ? primaryBtnStyle : secondaryBtnStyle),
+                width: "auto",
+                opacity: canCreate ? 1 : 0.4,
+                cursor: canCreate ? "pointer" : "not-allowed",
+                margin: 0,
+              }}
+            >
+              [ CREATE PAIR ]
+            </button>
+            {!canCreate && selectedA === "" && selectedB === "" && unpaired !== null && unpaired.length >= 2 && (
+              <span style={{ fontSize: "12px", color: GREEN_DIM }}>
+                Select Fragment A and Fragment B participants.
+              </span>
+            )}
+          </div>
+        ) : (
+          participantA && participantB && (
+            <div style={{ padding: "20px", border: `1px solid ${GREEN}`, background: BG, marginTop: "4px" }}>
+              <div style={{ fontSize: "14px", fontWeight: "bold", marginBottom: "16px", color: GREEN }}>
+                Create pair?
+              </div>
+              <div style={{ fontSize: "13px", color: GREEN_DIM, marginBottom: "24px", lineHeight: "1.8" }}>
+                <div>Fragment A: <span style={{ color: GREEN }}>{participantA.participant_code} — {participantA.name} — {participantA.branch ?? "—"}</span></div>
+                <div>Fragment B: <span style={{ color: GREEN }}>{participantB.participant_code} — {participantB.name} — {participantB.branch ?? "—"}</span></div>
+              </div>
+              <div style={{ display: "flex", gap: "16px" }}>
+                <button
+                  type="button"
+                  onClick={() => setShowConfirm(false)}
+                  disabled={isCreating}
+                  style={{ ...secondaryBtnStyle, width: "auto" }}
+                >
+                  [ CANCEL ]
+                </button>
+                <button
+                  id="btn-confirm-create-pair"
+                  type="button"
+                  onClick={handleCreatePair}
+                  disabled={isCreating}
+                  style={{ ...primaryBtnStyle, width: "auto", margin: 0 }}
+                >
+                  {isCreating ? "[ CREATING PAIR... ]" : "[ CREATE PAIR ]"}
+                </button>
+              </div>
+            </div>
+          )
+        )}
+      </SectionBlock>
+
+      {/* Pair list */}
+      <SectionBlock label="07  PAIR LIST">
+        {pairs === null || isLoading ? (
+          <StatusLine text={isLoading ? "Loading pairs..." : "No pair data."} />
+        ) : pairs.length === 0 ? (
+          <div style={{ fontSize: "13px", color: GREEN_DIM }}>
+            No pairs created yet.
+          </div>
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
+              <thead>
+                <tr style={{ borderBottom: `1px solid ${GREEN_FAINT}` }}>
+                  {["PAIR", "FRAGMENT A", "FRAGMENT B"].map(col => (
+                    <th key={col} style={{ textAlign: "left", padding: "8px 12px", color: GREEN_DIM,
+                                           fontWeight: "normal", fontSize: "11px", letterSpacing: "0.08em" }}>
+                      {col}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {pairs.map(p => (
+                  <tr key={p.pair_code} style={{ borderBottom: `1px solid ${GREEN_FAINT}` }}>
+                    <td style={{ padding: "10px 12px", color: GREEN, fontWeight: "bold" }}>{p.pair_code}</td>
+                    <td style={{ padding: "10px 12px", color: GREEN }}>
+                      {p.member_a_code} — {p.member_a_name} — {p.member_a_branch ?? "—"}
+                    </td>
+                    <td style={{ padding: "10px 12px", color: GREEN }}>
+                      {p.member_b_code} — {p.member_b_name} — {p.member_b_branch ?? "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </SectionBlock>
     </section>
   );

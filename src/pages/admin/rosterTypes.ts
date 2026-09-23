@@ -76,6 +76,39 @@ export interface ImportResult {
   skipped: number;
 }
 
+export interface UnpairedParticipant {
+  participant_code: string;
+  name: string;
+  branch: string | null;
+  registered_email: string;
+  is_linked: boolean;
+}
+
+export interface AdminPairRow {
+  pair_code: string;
+  member_a_code: string;
+  member_a_name: string;
+  member_a_branch: string | null;
+  member_b_code: string;
+  member_b_name: string;
+  member_b_branch: string | null;
+}
+
+export interface CreatePairResult {
+  success: boolean;
+  pair_code: string;
+  member_a: {
+    participant_code: string;
+    name: string;
+    branch: string | null;
+  };
+  member_b: {
+    participant_code: string;
+    name: string;
+    branch: string | null;
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Roster List
 // ---------------------------------------------------------------------------
