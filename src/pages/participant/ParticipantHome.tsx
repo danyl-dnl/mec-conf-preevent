@@ -1,11 +1,10 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { supabase } from "../../lib/supabase";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-/** Shape of our own row from the participants table */
 interface ParticipantProfile {
   id: string;
   participant_code: string;
@@ -13,16 +12,7 @@ interface ParticipantProfile {
   registered_email: string;
 }
 
-/**
- * All states the page can be in.
- *
- * loading         — checking session or calling RPC
- * unauthenticated — no session → show login button
- * linked          — LINKED or ALREADY_LINKED → show participant info
- * not_registered  — NOT_REGISTERED → not on the approved roster
- * denied          — LINKING_DENIED → account/identity conflict
- * error           — network failure or unexpected server response
- */
+/** States for the account-linking phase */
 type LinkStatus =
   | "loading"
   | "unauthenticated"
@@ -30,6 +20,39 @@ type LinkStatus =
   | "not_registered"
   | "denied"
   | "error";
+
+/** States for the pair-verification phase (active when linkStatus === "linked") */
+type PairStatus =
+  | "loading_pair"      // fetching pair state
+  | "NOT_PAIRED"        // no pair assigned yet
+  | "PAIRED"            // paired, not yet verified
+  | "INCORRECT"         // last attempt was wrong
+  | "LOCKED"            // too many wrong attempts
+  | "SELF_VERIFIED"     // self verified, waiting for partner
+  | "MUTUAL_VERIFIED";  // both verified
+
+/** Raw shape returned by get_my_pair_state() */
+interface PairState {
+  status: "NOT_PAIRED" | "PAIRED";
+  participant_code: string;
+  name: string;
+  fragment_slot?: "A" | "B";
+  wrong_attempts?: number;
+  attempts_remaining?: number;
+  is_locked?: boolean;
+  self_verified?: boolean;
+  partner_verified?: boolean;
+  mutual_verified?: boolean;
+}
+
+/** Raw shape returned by verify_my_partner() */
+interface VerifyResult {
+  status: "VERIFIED" | "INCORRECT" | "LOCKED";
+  self_verified?: boolean;
+  partner_verified?: boolean;
+  mutual_verified?: boolean;
+  attempts_remaining?: number;
+}
 
 // ---------------------------------------------------------------------------
 // Design tokens (inline — keeps this a single self-contained file)
@@ -101,6 +124,23 @@ const s = {
     marginBottom: "14px",
     boxShadow: `0 0 18px ${GREEN_FAINT}`,
   },
+  primaryBtnDisabled: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: "10px",
+    width: "100%",
+    padding: "16px 24px",
+    background: GREEN_FAINT,
+    color: GREEN_DIM,
+    border: `1px solid ${GREEN_FAINT}`,
+    fontFamily: "'Courier New', Courier, monospace",
+    fontSize: "13px",
+    fontWeight: "bold",
+    letterSpacing: "0.14em",
+    cursor: "not-allowed",
+    marginBottom: "14px",
+  },
   secondaryBtn: {
     display: "flex",
     alignItems: "center",
@@ -163,6 +203,40 @@ const s = {
     verticalAlign: "middle",
     boxShadow: `0 0 6px ${GREEN}`,
   },
+  input: {
+    width: "100%",
+    padding: "14px 16px",
+    background: "transparent",
+    color: GREEN,
+    border: `1px solid ${GREEN_DIM}`,
+    fontFamily: "'Courier New', Courier, monospace",
+    fontSize: "16px",
+    letterSpacing: "0.12em",
+    marginBottom: "16px",
+    boxSizing: "border-box" as const,
+    outline: "none",
+    textTransform: "uppercase" as const,
+  },
+  warningBox: {
+    border: `1px solid rgba(255,80,80,0.45)`,
+    padding: "14px 16px",
+    marginBottom: "20px",
+    background: "rgba(255,80,80,0.06)",
+    fontSize: "13px",
+    color: "rgba(255,120,120,0.9)",
+    letterSpacing: "0.04em",
+    lineHeight: "1.7",
+  },
+  successBox: {
+    border: `1px solid ${GREEN_FAINT}`,
+    padding: "14px 16px",
+    marginBottom: "20px",
+    background: "rgba(57,255,20,0.05)",
+    fontSize: "13px",
+    color: GREEN_DIM,
+    letterSpacing: "0.04em",
+    lineHeight: "1.7",
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -170,11 +244,19 @@ const s = {
 // ---------------------------------------------------------------------------
 
 export default function ParticipantHome() {
-  const [status, setStatus] = useState<LinkStatus>("loading");
+  const [linkStatus, setLinkStatus] = useState<LinkStatus>("loading");
   const [profile, setProfile] = useState<ParticipantProfile | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // Match the body background to our terminal theme
+  // Pair/verification state
+  const [pairStatus, setPairStatus] = useState<PairStatus>("loading_pair");
+  const [pairState, setPairState] = useState<PairState | null>(null);
+  const [partnerCodeInput, setPartnerCodeInput] = useState("");
+  const [attemptsRemaining, setAttemptsRemaining] = useState<number>(2);
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  // Match body background to terminal theme
   useEffect(() => {
     const prev = document.body.style.background;
     document.body.style.background = BG;
@@ -183,39 +265,75 @@ export default function ParticipantHome() {
     };
   }, []);
 
-  // On mount: check for an existing session and link if found
+  // loadPairState declared before the useEffect that depends on it
+  const loadPairState = useCallback(async () => {
+    const { data, error } = await supabase.rpc("get_my_pair_state");
+
+    if (error) {
+      console.error("get_my_pair_state:", error.message);
+      return;
+    }
+
+    // Runtime validation: must be an object with a status string
+    if (
+      !data ||
+      typeof data !== "object" ||
+      typeof (data as Record<string, unknown>)["status"] !== "string"
+    ) {
+      console.error("Unexpected pair state shape:", data);
+      return;
+    }
+
+    const ps = data as unknown as PairState;
+    setPairState(ps);
+
+    if (ps.status === "NOT_PAIRED") {
+      setPairStatus("NOT_PAIRED");
+      return;
+    }
+
+    // PAIRED branch — derive UI state from flags
+    const remaining = ps.attempts_remaining ?? 2;
+    setAttemptsRemaining(remaining);
+
+    if (ps.is_locked) {
+      setPairStatus("LOCKED");
+    } else if (ps.mutual_verified) {
+      setPairStatus("MUTUAL_VERIFIED");
+    } else if (ps.self_verified) {
+      setPairStatus("SELF_VERIFIED");
+    } else {
+      setPairStatus("PAIRED");
+    }
+  }, []);
+
+  // On mount: check session and link
   useEffect(() => {
     checkSessionAndLink();
   }, []);
 
-  /**
-   * Check whether the user already has a Supabase session.
-   * If yes, proceed to call the RPC.
-   * If no, show the login button.
-   */
-  async function checkSessionAndLink() {
-    setStatus("loading");
+  // Once linked, load pair state
+  useEffect(() => {
+    if (linkStatus === "linked") {
+      loadPairState();
+    }
+  }, [linkStatus, loadPairState]);
 
+  async function checkSessionAndLink() {
+    setLinkStatus("loading");
     const { data: { session }, error: sessionError } =
       await supabase.auth.getSession();
 
     if (sessionError || !session) {
-      setStatus("unauthenticated");
+      setLinkStatus("unauthenticated");
       return;
     }
 
     await performLinking();
   }
 
-  /**
-   * Call link_current_participant() and handle every possible result.
-   *
-   * The RPC takes zero arguments — the database derives the caller
-   * exclusively from auth.uid(). We never send any identity information
-   * from the frontend.
-   */
   async function performLinking() {
-    setStatus("loading");
+    setLinkStatus("loading");
     setErrorMessage(null);
 
     const { data, error: rpcError } = await supabase.rpc(
@@ -223,20 +341,17 @@ export default function ParticipantHome() {
     );
 
     if (rpcError) {
-      // Network failure or unexpected server error — not an auth denial
       console.error("link_current_participant:", rpcError.message);
       setErrorMessage(
         "Could not reach the server. Check your connection and try again.",
       );
-      setStatus("error");
+      setLinkStatus("error");
       return;
     }
 
     const result = data as string | null;
 
     if (result === "LINKED" || result === "ALREADY_LINKED") {
-      // The account is linked. Fetch our own row via RLS.
-      // RLS ensures we can only read our own participant row.
       const { data: row, error: fetchError } = await supabase
         .from("participants")
         .select("id, participant_code, name, registered_email")
@@ -247,30 +362,87 @@ export default function ParticipantHome() {
         setErrorMessage(
           "Your account was linked but your profile could not be loaded. Try refreshing the page.",
         );
-        setStatus("error");
+        setLinkStatus("error");
         return;
       }
 
       setProfile(row as ParticipantProfile);
-      setStatus("linked");
+      setLinkStatus("linked");
     } else if (result === "NOT_REGISTERED") {
-      // Authenticated, but the email is not on the approved roster
-      setStatus("not_registered");
+      setLinkStatus("not_registered");
     } else if (result === "LINKING_DENIED") {
-      // Identity/account conflict — we intentionally do not expose details
-      setStatus("denied");
+      setLinkStatus("denied");
     } else {
-      // Unexpected/unknown response from the server
       setErrorMessage("An unexpected response was received. Please try again.");
-      setStatus("error");
+      setLinkStatus("error");
     }
+  }
+
+
+
+  async function handleVerify() {
+    const code = partnerCodeInput.trim().toUpperCase();
+    if (!code || isVerifying) return;
+
+    setIsVerifying(true);
+
+    // Only send partner_code — never any identity info
+    const { data, error } = await supabase.rpc("verify_my_partner", {
+      partner_code: code,
+    });
+
+    setIsVerifying(false);
+
+    if (error) {
+      console.error("verify_my_partner:", error.message);
+      // Surface generic error without leaking server details
+      return;
+    }
+
+    // Runtime validation
+    if (
+      !data ||
+      typeof data !== "object" ||
+      typeof (data as Record<string, unknown>)["status"] !== "string"
+    ) {
+      console.error("Unexpected verify response shape:", data);
+      return;
+    }
+
+    const result = data as unknown as VerifyResult;
+    const remaining = result.attempts_remaining ?? 0;
+    setAttemptsRemaining(remaining);
+
+    if (result.status === "VERIFIED") {
+      if (result.mutual_verified) {
+        setPairStatus("MUTUAL_VERIFIED");
+      } else {
+        setPairStatus("SELF_VERIFIED");
+      }
+      setPartnerCodeInput("");
+    } else if (result.status === "INCORRECT") {
+      setPairStatus("INCORRECT");
+      setPartnerCodeInput("");
+    } else if (result.status === "LOCKED") {
+      setPairStatus("LOCKED");
+      setPartnerCodeInput("");
+    }
+  }
+
+  async function handleRefresh() {
+    setIsRefreshing(true);
+    await loadPairState();
+    setIsRefreshing(false);
   }
 
   async function handleSignOut() {
     await supabase.auth.signOut();
     setProfile(null);
     setErrorMessage(null);
-    setStatus("unauthenticated");
+    setPairState(null);
+    setPairStatus("loading_pair");
+    setPartnerCodeInput("");
+    setLinkStatus("unauthenticated");
   }
 
   async function handleGoogleSignIn() {
@@ -295,23 +467,59 @@ export default function ParticipantHome() {
           MEC.CONF 2026&nbsp;&nbsp;//&nbsp;&nbsp;PRE-EVENT
         </div>
 
-        {status === "loading" && <LoadingView />}
+        {linkStatus === "loading" && <LoadingView />}
 
-        {status === "unauthenticated" && (
+        {linkStatus === "unauthenticated" && (
           <LoginView onSignIn={handleGoogleSignIn} />
         )}
 
-        {status === "linked" && profile && (
-          <ProfileView profile={profile} onSignOut={handleSignOut} />
+        {linkStatus === "linked" && profile && (
+          <>
+            {pairStatus === "loading_pair" && <LoadingView />}
+
+            {pairStatus === "NOT_PAIRED" && (
+              <NotPairedView onSignOut={handleSignOut} />
+            )}
+
+            {(pairStatus === "PAIRED" || pairStatus === "INCORRECT") &&
+              pairState && (
+                <VerificationView
+                  pairState={pairState}
+                  attemptsRemaining={attemptsRemaining}
+                  isIncorrect={pairStatus === "INCORRECT"}
+                  partnerCodeInput={partnerCodeInput}
+                  onPartnerCodeChange={setPartnerCodeInput}
+                  onVerify={handleVerify}
+                  isVerifying={isVerifying}
+                  onSignOut={handleSignOut}
+                />
+              )}
+
+            {pairStatus === "LOCKED" && (
+              <LockedView onSignOut={handleSignOut} />
+            )}
+
+            {pairStatus === "SELF_VERIFIED" && (
+              <SelfVerifiedView
+                onRefresh={handleRefresh}
+                isRefreshing={isRefreshing}
+                onSignOut={handleSignOut}
+              />
+            )}
+
+            {pairStatus === "MUTUAL_VERIFIED" && (
+              <MutualVerifiedView onSignOut={handleSignOut} />
+            )}
+          </>
         )}
 
-        {status === "not_registered" && (
+        {linkStatus === "not_registered" && (
           <NotRegisteredView onSignOut={handleSignOut} />
         )}
 
-        {status === "denied" && <DeniedView onSignOut={handleSignOut} />}
+        {linkStatus === "denied" && <DeniedView onSignOut={handleSignOut} />}
 
-        {status === "error" && (
+        {linkStatus === "error" && (
           <ErrorView
             message={errorMessage}
             onRetry={performLinking}
@@ -324,7 +532,7 @@ export default function ParticipantHome() {
 }
 
 // ---------------------------------------------------------------------------
-// Local sub-views
+// Sub-views
 // ---------------------------------------------------------------------------
 
 function LoadingView() {
@@ -367,61 +575,241 @@ function LoginView({ onSignIn }: { onSignIn: () => void }) {
   );
 }
 
-function ProfileView({
-  profile,
-  onSignOut,
-}: {
-  profile: ParticipantProfile;
-  onSignOut: () => void;
-}) {
+function NotPairedView({ onSignOut }: { onSignOut: () => void }) {
   return (
     <>
-      <p
-        style={{
-          ...s.siteLabel,
-          marginBottom: "10px",
-        }}
-      >
-        FRAGMENT // ASSIGNED
+      <p style={{ ...s.siteLabel, marginBottom: "10px" }}>
+        PAIR ASSIGNMENT
       </p>
-      <h1
-        style={{
-          ...s.heading,
-          fontSize: "clamp(30px,8vw,42px)",
-          marginBottom: "28px",
-        }}
-      >
-        IDENTITY{"\n"}CONFIRMED.
+      <h1 style={{ ...s.heading, fontSize: "clamp(30px,8vw,42px)", marginBottom: "28px" }}>
+        PENDING.
       </h1>
 
-      <div style={s.infoBox}>
-        <div style={s.infoLabel}>PARTICIPANT</div>
-        <div style={s.infoValue}>{profile.name.toUpperCase()}</div>
-
-        <div style={s.infoLabel}>ID</div>
-        <div style={{ ...s.infoValue, marginBottom: "8px" }}>
-          {profile.participant_code}
-        </div>
-
-        <div style={{ ...s.infoLabel, marginBottom: 0 }}>
-          <span style={s.dot} />
-          ACCOUNT LINKED
-        </div>
-      </div>
-
       <p style={s.subtext}>
-        Your fragment is being prepared.
+        Pair assignment pending.
         <br />
-        More will appear here soon.
+        Check back once the event organisers have assigned pairs.
       </p>
 
-      <button id="btn-sign-out-profile" type="button" style={s.secondaryBtn} onClick={onSignOut}>
+      <button id="btn-sign-out-not-paired" type="button" style={s.secondaryBtn} onClick={onSignOut}>
         [ SIGN OUT ]
       </button>
 
       <div style={s.statusBar}>
-        <div>&gt;&gt; FRAGMENT_LOADED...</div>
-        <div>&gt;&gt; AWAITING_PARTNER...</div>
+        <div>&gt;&gt; AWAITING_PAIR_ASSIGNMENT...</div>
+        <div>&gt;&gt; STANDBY.</div>
+      </div>
+    </>
+  );
+}
+
+function VerificationView({
+  pairState,
+  attemptsRemaining,
+  isIncorrect,
+  partnerCodeInput,
+  onPartnerCodeChange,
+  onVerify,
+  isVerifying,
+  onSignOut,
+}: {
+  pairState: PairState;
+  attemptsRemaining: number;
+  isIncorrect: boolean;
+  partnerCodeInput: string;
+  onPartnerCodeChange: (v: string) => void;
+  onVerify: () => void;
+  isVerifying: boolean;
+  onSignOut: () => void;
+}) {
+  const canSubmit = partnerCodeInput.trim().length > 0 && !isVerifying && attemptsRemaining > 0;
+
+  return (
+    <>
+      <p style={{ ...s.siteLabel, marginBottom: "10px" }}>
+        FRAGMENT // {pairState.fragment_slot ?? "?"}
+      </p>
+      <h1 style={{ ...s.heading, fontSize: "clamp(30px,8vw,42px)", marginBottom: "28px" }}>
+        VERIFY{"\n"}PARTNER.
+      </h1>
+
+      <div style={s.infoBox}>
+        <div style={s.infoLabel}>PARTICIPANT</div>
+        <div style={s.infoValue}>{pairState.name.toUpperCase()}</div>
+
+        <div style={s.infoLabel}>YOUR CODE</div>
+        <div style={{ ...s.infoValue, marginBottom: "8px" }}>
+          {pairState.participant_code}
+        </div>
+
+        <div style={{ ...s.infoLabel, marginBottom: 0 }}>
+          FRAGMENT {pairState.fragment_slot ?? "?"}
+        </div>
+      </div>
+
+      {isIncorrect && (
+        <div style={s.warningBox}>
+          Incorrect partner code.
+          {attemptsRemaining === 1
+            ? " 1 attempt remaining."
+            : ` ${attemptsRemaining} attempts remaining.`}
+        </div>
+      )}
+
+      {!isIncorrect && (
+        <div style={{ ...s.infoLabel, marginBottom: "8px" }}>
+          ATTEMPTS REMAINING: {attemptsRemaining}
+        </div>
+      )}
+
+      <input
+        id="input-partner-code"
+        type="text"
+        placeholder="PARTNER CODE"
+        value={partnerCodeInput}
+        onChange={(e) => onPartnerCodeChange(e.target.value)}
+        style={s.input}
+        maxLength={32}
+        autoCapitalize="characters"
+        autoComplete="off"
+        autoCorrect="off"
+        spellCheck={false}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && canSubmit) onVerify();
+        }}
+        disabled={isVerifying}
+        aria-label="Partner code"
+      />
+
+      <button
+        id="btn-verify-partner"
+        type="button"
+        style={canSubmit ? s.primaryBtn : s.primaryBtnDisabled}
+        onClick={onVerify}
+        disabled={!canSubmit}
+        aria-disabled={!canSubmit}
+      >
+        {isVerifying ? "[ VERIFYING... ]" : "[ VERIFY PARTNER ]"}
+      </button>
+
+      <button id="btn-sign-out-verify" type="button" style={s.secondaryBtn} onClick={onSignOut}>
+        [ SIGN OUT ]
+      </button>
+
+      <div style={s.statusBar}>
+        <div>&gt;&gt; PAIRED_STATUS: ACTIVE...</div>
+        <div>&gt;&gt; AWAITING_VERIFICATION...</div>
+        <div>&gt;&gt; ENTER_PARTNER_CODE.</div>
+      </div>
+    </>
+  );
+}
+
+function LockedView({ onSignOut }: { onSignOut: () => void }) {
+  return (
+    <>
+      <h1 style={{ ...s.heading, fontSize: "clamp(30px,8vw,42px)", marginBottom: "28px" }}>
+        VERIFICATION{"\n"}LOCKED.
+      </h1>
+
+      <p style={s.subtext}>
+        Verification locked. Contact an organizer.
+      </p>
+
+      <button id="btn-sign-out-locked" type="button" style={s.secondaryBtn} onClick={onSignOut}>
+        [ SIGN OUT ]
+      </button>
+
+      <div style={s.statusBar}>
+        <div>&gt;&gt; VERIFICATION_LOCKED...</div>
+        <div>&gt;&gt; CONTACT_ORGANIZER.</div>
+      </div>
+    </>
+  );
+}
+
+function SelfVerifiedView({
+  onRefresh,
+  isRefreshing,
+  onSignOut,
+}: {
+  onRefresh: () => void;
+  isRefreshing: boolean;
+  onSignOut: () => void;
+}) {
+  return (
+    <>
+      <p style={{ ...s.siteLabel, marginBottom: "10px" }}>
+        VERIFICATION // IN PROGRESS
+      </p>
+      <h1 style={{ ...s.heading, fontSize: "clamp(30px,8vw,42px)", marginBottom: "28px" }}>
+        PARTNER{"\n"}VERIFIED.
+      </h1>
+
+      <div style={s.successBox}>
+        <div>
+          <span style={s.dot} />
+          Partner verified.
+        </div>
+        <div style={{ marginTop: "8px" }}>
+          Waiting for your partner to verify you.
+        </div>
+      </div>
+
+      <button
+        id="btn-refresh-status"
+        type="button"
+        style={isRefreshing ? s.primaryBtnDisabled : s.primaryBtn}
+        onClick={onRefresh}
+        disabled={isRefreshing}
+        aria-disabled={isRefreshing}
+      >
+        {isRefreshing ? "[ REFRESHING... ]" : "[ REFRESH STATUS ]"}
+      </button>
+
+      <button id="btn-sign-out-self-verified" type="button" style={s.secondaryBtn} onClick={onSignOut}>
+        [ SIGN OUT ]
+      </button>
+
+      <div style={s.statusBar}>
+        <div>&gt;&gt; SELF_VERIFIED: TRUE...</div>
+        <div>&gt;&gt; PARTNER_VERIFIED: PENDING...</div>
+        <div>&gt;&gt; AWAITING_MUTUAL_CONFIRMATION.</div>
+      </div>
+    </>
+  );
+}
+
+function MutualVerifiedView({ onSignOut }: { onSignOut: () => void }) {
+  return (
+    <>
+      <p style={{ ...s.siteLabel, marginBottom: "10px" }}>
+        VERIFICATION // COMPLETE
+      </p>
+      <h1 style={{ ...s.heading, fontSize: "clamp(28px,7vw,38px)", marginBottom: "28px" }}>
+        CONNECTION{"\n"}ESTABLISHED.
+      </h1>
+
+      <div style={s.successBox}>
+        <div>
+          <span style={s.dot} />
+          Both participants verified.
+        </div>
+      </div>
+
+      <p style={s.subtext}>
+        Both participants verified.
+        <br />
+        Stand by for further instructions.
+      </p>
+
+      <button id="btn-sign-out-mutual" type="button" style={s.secondaryBtn} onClick={onSignOut}>
+        [ SIGN OUT ]
+      </button>
+
+      <div style={s.statusBar}>
+        <div>&gt;&gt; MUTUAL_VERIFIED: TRUE...</div>
+        <div>&gt;&gt; CONNECTION_ESTABLISHED.</div>
         <div>&gt;&gt; GOOD_LUCK.</div>
       </div>
     </>
