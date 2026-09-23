@@ -1,18 +1,12 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "../../lib/supabase";
+import { isPairState, isVerifyResult, type PairState } from "./verificationState";
+import "../../index.css"; // Ensure styles are loaded
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-interface ParticipantProfile {
-  id: string;
-  participant_code: string;
-  name: string;
-  registered_email: string;
-}
-
-/** States for the account-linking phase */
 type LinkStatus =
   | "loading"
   | "unauthenticated"
@@ -21,60 +15,27 @@ type LinkStatus =
   | "denied"
   | "error";
 
-/** States for the pair-verification phase (active when linkStatus === "linked") */
 type PairStatus =
-  | "loading_pair"      // fetching pair state
-  | "NOT_PAIRED"        // no pair assigned yet
-  | "PAIRED"            // paired, not yet verified
-  | "INCORRECT"         // last attempt was wrong
-  | "LOCKED"            // too many wrong attempts
-  | "SELF_VERIFIED"     // self verified, waiting for partner
-  | "MUTUAL_VERIFIED";  // both verified
-
-/** Raw shape returned by get_my_pair_state() */
-interface PairState {
-  status: "NOT_PAIRED" | "PAIRED";
-  participant_code: string;
-  name: string;
-  fragment_slot?: "A" | "B";
-  wrong_attempts?: number;
-  attempts_remaining?: number;
-  is_locked?: boolean;
-  self_verified?: boolean;
-  partner_verified?: boolean;
-  mutual_verified?: boolean;
-}
-
-/** Raw shape returned by verify_my_partner() */
-interface VerifyResult {
-  status: "VERIFIED" | "INCORRECT" | "LOCKED";
-  self_verified?: boolean;
-  partner_verified?: boolean;
-  mutual_verified?: boolean;
-  attempts_remaining?: number;
-}
+  | "error_pair"
+  | "loading_pair"
+  | "NOT_PAIRED"
+  | "PAIRED"
+  | "INCORRECT"
+  | "LOCKED"
+  | "SELF_VERIFIED"
+  | "MUTUAL_VERIFIED";
 
 // ---------------------------------------------------------------------------
-// Design tokens (inline — keeps this a single self-contained file)
+// Design tokens (mapped to CSS variables)
 // ---------------------------------------------------------------------------
-
-const GREEN = "#39ff14";
-const GREEN_DIM = "rgba(57,255,20,0.55)";
-const GREEN_FAINT = "rgba(57,255,20,0.12)";
-const BG = "#050905";
 
 const s = {
   page: {
-    background: BG,
-    minHeight: "100svh",
     flex: "1",
     display: "flex",
     flexDirection: "column" as const,
     alignItems: "center",
-    justifyContent: "center",
     padding: "32px 24px",
-    fontFamily: "'Courier New', Courier, monospace",
-    color: GREEN,
     boxSizing: "border-box" as const,
   },
   card: {
@@ -82,26 +43,48 @@ const s = {
     maxWidth: "420px",
     display: "flex",
     flexDirection: "column" as const,
+    position: "relative" as const,
+  },
+  globalHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    borderBottom: "1px solid var(--green-dim)",
+    paddingBottom: "16px",
+    marginBottom: "40px",
+  },
+  siteLabelTitle: {
+    fontSize: "14px",
+    fontFamily: "var(--font-pixel)",
+    letterSpacing: "0.1em",
+    color: "var(--green)",
+    lineHeight: "1.2",
+  },
+  hamburger: {
+    fontSize: "20px",
+    color: "var(--green)",
+    cursor: "pointer",
   },
   siteLabel: {
     fontSize: "11px",
     letterSpacing: "0.18em",
-    color: GREEN_DIM,
-    marginBottom: "40px",
+    color: "var(--green-dim)",
+    marginBottom: "20px",
     lineHeight: "1.8",
   },
   heading: {
-    fontSize: "clamp(38px,11vw,54px)",
-    fontWeight: "bold",
-    color: GREEN,
-    lineHeight: "1.0",
-    letterSpacing: "-0.01em",
+    fontFamily: "var(--font-pixel)",
+    fontSize: "clamp(48px, 12vw, 64px)",
+    fontWeight: "normal",
+    color: "var(--green)",
+    lineHeight: "0.9",
+    letterSpacing: "0.02em",
     margin: "0 0 20px",
-    textShadow: `0 0 28px ${GREEN_DIM}`,
+    textShadow: "0 0 10px var(--green-dim)",
   },
   subtext: {
-    fontSize: "14px",
-    color: GREEN_DIM,
+    fontSize: "13px",
+    color: "var(--green-dim)",
     lineHeight: "1.8",
     margin: "0 0 40px",
     letterSpacing: "0.02em",
@@ -113,16 +96,16 @@ const s = {
     gap: "10px",
     width: "100%",
     padding: "16px 24px",
-    background: GREEN,
-    color: BG,
+    background: "var(--green)",
+    color: "var(--bg)",
     border: "none",
-    fontFamily: "'Courier New', Courier, monospace",
-    fontSize: "13px",
+    fontFamily: "var(--font-mono)",
+    fontSize: "14px",
     fontWeight: "bold",
     letterSpacing: "0.14em",
     cursor: "pointer",
     marginBottom: "14px",
-    boxShadow: `0 0 18px ${GREEN_FAINT}`,
+    boxShadow: "0 0 15px var(--green-faint)",
   },
   primaryBtnDisabled: {
     display: "flex",
@@ -131,11 +114,11 @@ const s = {
     gap: "10px",
     width: "100%",
     padding: "16px 24px",
-    background: GREEN_FAINT,
-    color: GREEN_DIM,
-    border: `1px solid ${GREEN_FAINT}`,
-    fontFamily: "'Courier New', Courier, monospace",
-    fontSize: "13px",
+    background: "var(--green-faint)",
+    color: "var(--green-dim)",
+    border: "1px solid var(--green-faint)",
+    fontFamily: "var(--font-mono)",
+    fontSize: "14px",
     fontWeight: "bold",
     letterSpacing: "0.14em",
     cursor: "not-allowed",
@@ -148,18 +131,18 @@ const s = {
     width: "100%",
     padding: "14px 24px",
     background: "transparent",
-    color: GREEN,
-    border: `1px solid ${GREEN}`,
-    fontFamily: "'Courier New', Courier, monospace",
-    fontSize: "13px",
+    color: "var(--green)",
+    border: "1px solid var(--green)",
+    fontFamily: "var(--font-mono)",
+    fontSize: "14px",
     fontWeight: "bold",
     letterSpacing: "0.14em",
     cursor: "pointer",
-    opacity: 0.75,
+    opacity: 0.85,
   },
   disclaimer: {
     fontSize: "11px",
-    color: GREEN_DIM,
+    color: "var(--green-dim)",
     letterSpacing: "0.06em",
     marginTop: "18px",
     lineHeight: "1.7",
@@ -167,28 +150,40 @@ const s = {
   statusBar: {
     marginTop: "48px",
     paddingTop: "16px",
-    borderTop: `1px solid ${GREEN_FAINT}`,
+    borderTop: "1px solid var(--green-faint)",
     fontSize: "10px",
-    color: GREEN_DIM,
+    color: "var(--green-dim)",
     letterSpacing: "0.1em",
     lineHeight: "1.9",
-    opacity: 0.55,
+    opacity: 0.7,
   },
   infoBox: {
-    border: `1px solid ${GREEN_FAINT}`,
+    border: "1px solid var(--green-dim)",
     padding: "20px 20px 16px",
     marginBottom: "28px",
-    background: "rgba(57,255,20,0.03)",
+    background: "var(--green-faint)",
+    position: "relative" as const,
+  },
+  infoBoxCorners: {
+    position: "absolute" as const,
+    top: "-1px",
+    left: "-1px",
+    right: "-1px",
+    bottom: "-1px",
+    border: "1px solid var(--green)",
+    clipPath: "polygon(0 0, 10px 0, 0 10px, 0 0, 100% 0, 100% 10px, calc(100% - 10px) 0, 100% 0, 100% 100%, calc(100% - 10px) 100%, 100% calc(100% - 10px), 100% 100%, 0 100%, 0 calc(100% - 10px), 10px 100%, 0 100%)"
   },
   infoLabel: {
     fontSize: "10px",
     letterSpacing: "0.18em",
-    color: GREEN_DIM,
+    color: "var(--green-dim)",
     marginBottom: "5px",
+    display: "flex",
+    justifyContent: "space-between",
   },
   infoValue: {
-    fontSize: "20px",
-    color: GREEN,
+    fontSize: "18px",
+    color: "var(--green)",
     fontWeight: "bold",
     letterSpacing: "0.04em",
     marginBottom: "18px",
@@ -197,19 +192,19 @@ const s = {
     display: "inline-block",
     width: "6px",
     height: "6px",
-    background: GREEN,
+    background: "var(--green)",
     borderRadius: "50%",
     marginRight: "8px",
     verticalAlign: "middle",
-    boxShadow: `0 0 6px ${GREEN}`,
+    boxShadow: "0 0 6px var(--green)",
   },
   input: {
     width: "100%",
-    padding: "14px 16px",
+    padding: "16px 16px",
     background: "transparent",
-    color: GREEN,
-    border: `1px solid ${GREEN_DIM}`,
-    fontFamily: "'Courier New', Courier, monospace",
+    color: "var(--green)",
+    border: "1px solid var(--green-dim)",
+    fontFamily: "var(--font-mono)",
     fontSize: "16px",
     letterSpacing: "0.12em",
     marginBottom: "16px",
@@ -218,7 +213,7 @@ const s = {
     textTransform: "uppercase" as const,
   },
   warningBox: {
-    border: `1px solid rgba(255,80,80,0.45)`,
+    border: "1px solid rgba(255,80,80,0.45)",
     padding: "14px 16px",
     marginBottom: "20px",
     background: "rgba(255,80,80,0.06)",
@@ -228,15 +223,30 @@ const s = {
     lineHeight: "1.7",
   },
   successBox: {
-    border: `1px solid ${GREEN_FAINT}`,
+    border: "1px solid var(--green-dim)",
     padding: "14px 16px",
     marginBottom: "20px",
-    background: "rgba(57,255,20,0.05)",
+    background: "var(--green-faint)",
     fontSize: "13px",
-    color: GREEN_DIM,
+    color: "var(--green)",
     letterSpacing: "0.04em",
     lineHeight: "1.7",
   },
+  gridGraphic: {
+    width: "100%",
+    height: "150px",
+    border: "1px solid var(--green-dim)",
+    marginBottom: "20px",
+    display: "grid",
+    gridTemplateColumns: "repeat(8, 1fr)",
+    gridTemplateRows: "repeat(5, 1fr)",
+    gap: "1px",
+    background: "var(--green-faint)",
+  },
+  gridCellActive: {
+    background: "var(--green)",
+    opacity: 0.8,
+  }
 };
 
 // ---------------------------------------------------------------------------
@@ -245,10 +255,9 @@ const s = {
 
 export default function ParticipantHome() {
   const [linkStatus, setLinkStatus] = useState<LinkStatus>("loading");
-  const [profile, setProfile] = useState<ParticipantProfile | null>(null);
+  const verifyInFlight = useRef(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // Pair/verification state
   const [pairStatus, setPairStatus] = useState<PairStatus>("loading_pair");
   const [pairState, setPairState] = useState<PairState | null>(null);
   const [partnerCodeInput, setPartnerCodeInput] = useState("");
@@ -256,35 +265,19 @@ export default function ParticipantHome() {
   const [isVerifying, setIsVerifying] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  // Match body background to terminal theme
-  useEffect(() => {
-    const prev = document.body.style.background;
-    document.body.style.background = BG;
-    return () => {
-      document.body.style.background = prev;
-    };
-  }, []);
-
-  // loadPairState declared before the useEffect that depends on it
   const loadPairState = useCallback(async () => {
-    const { data, error } = await supabase.rpc("get_my_pair_state");
-
-    if (error) {
-      console.error("get_my_pair_state:", error.message);
+    setErrorMessage(null);
+    let ps: PairState;
+    try {
+      const { data, error } = await supabase.rpc("get_my_pair_state");
+      if (error || !isPairState(data)) throw new Error("Invalid pair response");
+      ps = data;
+    } catch {
+      setPairState(null);
+      setPairStatus("error_pair");
+      setErrorMessage("Could not load verification status. Please refresh status to try again.");
       return;
     }
-
-    // Runtime validation: must be an object with a status string
-    if (
-      !data ||
-      typeof data !== "object" ||
-      typeof (data as Record<string, unknown>)["status"] !== "string"
-    ) {
-      console.error("Unexpected pair state shape:", data);
-      return;
-    }
-
-    const ps = data as unknown as PairState;
     setPairState(ps);
 
     if (ps.status === "NOT_PAIRED") {
@@ -292,7 +285,6 @@ export default function ParticipantHome() {
       return;
     }
 
-    // PAIRED branch — derive UI state from flags
     const remaining = ps.attempts_remaining ?? 2;
     setAttemptsRemaining(remaining);
 
@@ -307,32 +299,7 @@ export default function ParticipantHome() {
     }
   }, []);
 
-  // On mount: check session and link
-  useEffect(() => {
-    checkSessionAndLink();
-  }, []);
-
-  // Once linked, load pair state
-  useEffect(() => {
-    if (linkStatus === "linked") {
-      loadPairState();
-    }
-  }, [linkStatus, loadPairState]);
-
-  async function checkSessionAndLink() {
-    setLinkStatus("loading");
-    const { data: { session }, error: sessionError } =
-      await supabase.auth.getSession();
-
-    if (sessionError || !session) {
-      setLinkStatus("unauthenticated");
-      return;
-    }
-
-    await performLinking();
-  }
-
-  async function performLinking() {
+  const performLinking = useCallback(async () => {
     setLinkStatus("loading");
     setErrorMessage(null);
 
@@ -349,25 +316,11 @@ export default function ParticipantHome() {
       return;
     }
 
-    const result = data as string | null;
+    const result: unknown = data;
 
     if (result === "LINKED" || result === "ALREADY_LINKED") {
-      const { data: row, error: fetchError } = await supabase
-        .from("participants")
-        .select("id, participant_code, name, registered_email")
-        .single();
-
-      if (fetchError || !row) {
-        console.error("Profile fetch failed:", fetchError?.message);
-        setErrorMessage(
-          "Your account was linked but your profile could not be loaded. Try refreshing the page.",
-        );
-        setLinkStatus("error");
-        return;
-      }
-
-      setProfile(row as ParticipantProfile);
       setLinkStatus("linked");
+      await loadPairState();
     } else if (result === "NOT_REGISTERED") {
       setLinkStatus("not_registered");
     } else if (result === "LINKING_DENIED") {
@@ -376,56 +329,60 @@ export default function ParticipantHome() {
       setErrorMessage("An unexpected response was received. Please try again.");
       setLinkStatus("error");
     }
-  }
+  }, [loadPairState]);
 
-
+  useEffect(() => {
+    async function initialize() {
+      try {
+        const { data: { session }, error } = await supabase.auth.getSession();
+        if (error || !session) {
+          setLinkStatus("unauthenticated");
+          return;
+        }
+        await performLinking();
+      } catch {
+        setErrorMessage("Could not connect. Please try again.");
+        setLinkStatus("error");
+      }
+    }
+    void initialize();
+  }, [performLinking]);
 
   async function handleVerify() {
     const code = partnerCodeInput.trim().toUpperCase();
-    if (!code || isVerifying) return;
+    if (!code || verifyInFlight.current ||
+        (pairStatus !== "PAIRED" && pairStatus !== "INCORRECT") || attemptsRemaining <= 0) return;
 
+    verifyInFlight.current = true;
     setIsVerifying(true);
+    setErrorMessage(null);
+    try {
+      const { data, error } = await supabase.rpc("verify_my_partner", { partner_code: code });
+      if (error || !isVerifyResult(data)) throw new Error("Invalid verification response");
+      const result = data;
+      const remaining = result.attempts_remaining ?? 0;
+      setAttemptsRemaining(remaining);
 
-    // Only send partner_code — never any identity info
-    const { data, error } = await supabase.rpc("verify_my_partner", {
-      partner_code: code,
-    });
-
-    setIsVerifying(false);
-
-    if (error) {
-      console.error("verify_my_partner:", error.message);
-      // Surface generic error without leaking server details
-      return;
-    }
-
-    // Runtime validation
-    if (
-      !data ||
-      typeof data !== "object" ||
-      typeof (data as Record<string, unknown>)["status"] !== "string"
-    ) {
-      console.error("Unexpected verify response shape:", data);
-      return;
-    }
-
-    const result = data as unknown as VerifyResult;
-    const remaining = result.attempts_remaining ?? 0;
-    setAttemptsRemaining(remaining);
-
-    if (result.status === "VERIFIED") {
-      if (result.mutual_verified) {
-        setPairStatus("MUTUAL_VERIFIED");
-      } else {
-        setPairStatus("SELF_VERIFIED");
+      if (result.status === "VERIFIED") {
+        if (result.mutual_verified) {
+          setPairStatus("MUTUAL_VERIFIED");
+        } else {
+          setPairStatus("SELF_VERIFIED");
+        }
+        setPartnerCodeInput("");
+      } else if (result.status === "INCORRECT") {
+        setPairStatus("INCORRECT");
+        setPartnerCodeInput("");
+      } else if (result.status === "LOCKED") {
+        setPairStatus("LOCKED");
+        setPartnerCodeInput("");
       }
-      setPartnerCodeInput("");
-    } else if (result.status === "INCORRECT") {
-      setPairStatus("INCORRECT");
-      setPartnerCodeInput("");
-    } else if (result.status === "LOCKED") {
-      setPairStatus("LOCKED");
-      setPartnerCodeInput("");
+    } catch {
+      setPairStatus("error_pair");
+      setErrorMessage("Could not confirm verification. Refresh status before trying again.");
+    } finally {
+      verifyInFlight.current = false;
+      setIsVerifying(false);
     }
   }
 
@@ -437,7 +394,6 @@ export default function ParticipantHome() {
 
   async function handleSignOut() {
     await supabase.auth.signOut();
-    setProfile(null);
     setErrorMessage(null);
     setPairState(null);
     setPairStatus("loading_pair");
@@ -456,15 +412,14 @@ export default function ParticipantHome() {
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // Render
-  // ---------------------------------------------------------------------------
-
   return (
     <div style={s.page}>
       <div style={s.card}>
-        <div style={s.siteLabel}>
-          MEC.CONF 2026&nbsp;&nbsp;//&nbsp;&nbsp;PRE-EVENT
+        <div style={s.globalHeader}>
+          <div style={s.siteLabelTitle}>
+            MEC.CONF<br />PRE-EVENT
+          </div>
+          <div style={s.hamburger}>≡</div>
         </div>
 
         {linkStatus === "loading" && <LoadingView />}
@@ -473,7 +428,7 @@ export default function ParticipantHome() {
           <LoginView onSignIn={handleGoogleSignIn} />
         )}
 
-        {linkStatus === "linked" && profile && (
+        {linkStatus === "linked" && (
           <>
             {pairStatus === "loading_pair" && <LoadingView />}
 
@@ -481,19 +436,29 @@ export default function ParticipantHome() {
               <NotPairedView onSignOut={handleSignOut} />
             )}
 
-            {(pairStatus === "PAIRED" || pairStatus === "INCORRECT") &&
-              pairState && (
+            {pairStatus === "error_pair" && (
+              <ErrorView message={errorMessage} onRetry={handleRefresh} onSignOut={handleSignOut} />
+            )}
+
+            {(pairStatus === "PAIRED" || pairStatus === "INCORRECT") && pairState && (
+              <>
+                <div style={s.infoBox}>
+                  <div style={s.infoLabel}>Participant</div>
+                  <div style={{ ...s.infoValue, overflowWrap: "anywhere" }}>{pairState.name}</div>
+                  <div style={s.infoLabel}>Participant code</div>
+                  <div style={{ ...s.infoValue, overflowWrap: "anywhere" }}>{pairState.participant_code}</div>
+                  <div>FRAGMENT {pairState.fragment_slot}</div>
+                </div>
                 <VerificationView
-                  pairState={pairState}
                   attemptsRemaining={attemptsRemaining}
                   isIncorrect={pairStatus === "INCORRECT"}
                   partnerCodeInput={partnerCodeInput}
                   onPartnerCodeChange={setPartnerCodeInput}
                   onVerify={handleVerify}
                   isVerifying={isVerifying}
-                  onSignOut={handleSignOut}
                 />
-              )}
+              </>
+            )}
 
             {pairStatus === "LOCKED" && (
               <LockedView onSignOut={handleSignOut} />
@@ -503,12 +468,11 @@ export default function ParticipantHome() {
               <SelfVerifiedView
                 onRefresh={handleRefresh}
                 isRefreshing={isRefreshing}
-                onSignOut={handleSignOut}
               />
             )}
 
             {pairStatus === "MUTUAL_VERIFIED" && (
-              <MutualVerifiedView onSignOut={handleSignOut} />
+              <MutualVerifiedView />
             )}
           </>
         )}
@@ -551,15 +515,18 @@ function LoadingView() {
 function LoginView({ onSignIn }: { onSignIn: () => void }) {
   return (
     <>
-      <h1 style={s.heading}>YOUR HALF{"\n"}AWAITS.</h1>
+      <h1 style={s.heading}>YOUR HALF<br/>AWAITS.</h1>
       <p style={s.subtext}>
-        One puzzle. Two fragments.
-        <br />
+        One puzzle. Two fragments.<br />
         Find your partner. Solve together.
       </p>
 
+      <div style={{ height: "120px", display: "flex", justifyContent: "center", alignItems: "center", marginBottom: "40px", border: "1px dashed var(--green-dim)" }}>
+         [ Face Graphic Placeholder ]
+      </div>
+
       <button id="btn-google-signin" type="button" style={s.primaryBtn} onClick={onSignIn}>
-        <GoogleIcon />[ CONTINUE WITH GOOGLE ]
+        <GoogleIcon /> [ CONTINUE WITH GOOGLE ]
       </button>
 
       <p style={s.disclaimer}>
@@ -567,9 +534,16 @@ function LoginView({ onSignIn }: { onSignIn: () => void }) {
       </p>
 
       <div style={s.statusBar}>
-        <div>&gt;&gt; AUTHENTICATION_REQUIRED...</div>
-        <div>&gt;&gt; INITIATING_SECURE_LOGIN...</div>
-        <div>&gt;&gt; STANDBY.</div>
+        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+          <div>
+            &gt;&gt; AUTHENTICATION_REQUIRED...<br/>
+            &gt;&gt; INITIATING_SECURE_LOGIN...<br/>
+            &gt;&gt; STANDBY...
+          </div>
+          <div style={{ textAlign: 'right' }}>
+            MEC.CONF<br/>2026
+          </div>
+        </div>
       </div>
     </>
   );
@@ -578,23 +552,14 @@ function LoginView({ onSignIn }: { onSignIn: () => void }) {
 function NotPairedView({ onSignOut }: { onSignOut: () => void }) {
   return (
     <>
-      <p style={{ ...s.siteLabel, marginBottom: "10px" }}>
-        PAIR ASSIGNMENT
-      </p>
-      <h1 style={{ ...s.heading, fontSize: "clamp(30px,8vw,42px)", marginBottom: "28px" }}>
-        PENDING.
-      </h1>
-
+      <h1 style={s.heading}>PENDING.</h1>
       <p style={s.subtext}>
-        Pair assignment pending.
-        <br />
+        Pair assignment pending.<br />
         Check back once the event organisers have assigned pairs.
       </p>
-
       <button id="btn-sign-out-not-paired" type="button" style={s.secondaryBtn} onClick={onSignOut}>
         [ SIGN OUT ]
       </button>
-
       <div style={s.statusBar}>
         <div>&gt;&gt; AWAITING_PAIR_ASSIGNMENT...</div>
         <div>&gt;&gt; STANDBY.</div>
@@ -604,68 +569,48 @@ function NotPairedView({ onSignOut }: { onSignOut: () => void }) {
 }
 
 function VerificationView({
-  pairState,
   attemptsRemaining,
   isIncorrect,
   partnerCodeInput,
   onPartnerCodeChange,
   onVerify,
   isVerifying,
-  onSignOut,
 }: {
-  pairState: PairState;
   attemptsRemaining: number;
   isIncorrect: boolean;
   partnerCodeInput: string;
   onPartnerCodeChange: (v: string) => void;
   onVerify: () => void;
   isVerifying: boolean;
-  onSignOut: () => void;
 }) {
   const canSubmit = partnerCodeInput.trim().length > 0 && !isVerifying && attemptsRemaining > 0;
 
   return (
     <>
-      <p style={{ ...s.siteLabel, marginBottom: "10px" }}>
-        FRAGMENT // {pairState.fragment_slot ?? "?"}
-      </p>
-      <h1 style={{ ...s.heading, fontSize: "clamp(30px,8vw,42px)", marginBottom: "28px" }}>
-        VERIFY{"\n"}PARTNER.
+      <h1 style={{ ...s.heading, fontSize: "42px" }}>
+        VERIFY<br />YOUR PARTNER.
       </h1>
 
-      <div style={s.infoBox}>
-        <div style={s.infoLabel}>PARTICIPANT</div>
-        <div style={s.infoValue}>{pairState.name.toUpperCase()}</div>
-
-        <div style={s.infoLabel}>YOUR CODE</div>
-        <div style={{ ...s.infoValue, marginBottom: "8px" }}>
-          {pairState.participant_code}
-        </div>
-
-        <div style={{ ...s.infoLabel, marginBottom: 0 }}>
-          FRAGMENT {pairState.fragment_slot ?? "?"}
-        </div>
-      </div>
+      <p style={{ ...s.subtext, marginBottom: "28px" }}>
+        Enter your partner's<br />
+        Participant ID to confirm<br />
+        your connection.
+      </p>
 
       {isIncorrect && (
-        <div style={s.warningBox}>
-          Incorrect partner code.
-          {attemptsRemaining === 1
-            ? " 1 attempt remaining."
-            : ` ${attemptsRemaining} attempts remaining.`}
+        <div style={s.warningBox} role="alert">
+          Incorrect partner code. Please try again.
         </div>
       )}
 
-      {!isIncorrect && (
-        <div style={{ ...s.infoLabel, marginBottom: "8px" }}>
-          ATTEMPTS REMAINING: {attemptsRemaining}
-        </div>
-      )}
+      <div style={{ ...s.infoLabel, marginBottom: "8px" }}>
+        Partner ID
+      </div>
 
       <input
         id="input-partner-code"
         type="text"
-        placeholder="PARTNER CODE"
+        placeholder="MCF-"
         value={partnerCodeInput}
         onChange={(e) => onPartnerCodeChange(e.target.value)}
         style={s.input}
@@ -681,6 +626,10 @@ function VerificationView({
         aria-label="Partner code"
       />
 
+      <div style={{ ...s.infoLabel, marginBottom: "20px" }}>
+        Attempts remaining: {attemptsRemaining}
+      </div>
+
       <button
         id="btn-verify-partner"
         type="button"
@@ -692,14 +641,17 @@ function VerificationView({
         {isVerifying ? "[ VERIFYING... ]" : "[ VERIFY PARTNER ]"}
       </button>
 
-      <button id="btn-sign-out-verify" type="button" style={s.secondaryBtn} onClick={onSignOut}>
-        [ SIGN OUT ]
-      </button>
-
       <div style={s.statusBar}>
-        <div>&gt;&gt; PAIRED_STATUS: ACTIVE...</div>
-        <div>&gt;&gt; AWAITING_VERIFICATION...</div>
-        <div>&gt;&gt; ENTER_PARTNER_CODE.</div>
+        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+          <div>
+            &gt;&gt; SEEKING_CONNECTION...<br/>
+            &gt;&gt; INPUT_PARTNER_ID...<br/>
+            &gt;&gt; ESTABLISH_LINK...
+          </div>
+          <div style={{ textAlign: 'right' }}>
+            MEC.CONF<br/>2026
+          </div>
+        </div>
       </div>
     </>
   );
@@ -708,18 +660,15 @@ function VerificationView({
 function LockedView({ onSignOut }: { onSignOut: () => void }) {
   return (
     <>
-      <h1 style={{ ...s.heading, fontSize: "clamp(30px,8vw,42px)", marginBottom: "28px" }}>
-        VERIFICATION{"\n"}LOCKED.
+      <h1 style={{ ...s.heading, fontSize: "42px" }}>
+        VERIFICATION<br />LOCKED.
       </h1>
-
       <p style={s.subtext}>
         Verification locked. Contact an organizer.
       </p>
-
       <button id="btn-sign-out-locked" type="button" style={s.secondaryBtn} onClick={onSignOut}>
         [ SIGN OUT ]
       </button>
-
       <div style={s.statusBar}>
         <div>&gt;&gt; VERIFICATION_LOCKED...</div>
         <div>&gt;&gt; CONTACT_ORGANIZER.</div>
@@ -731,31 +680,19 @@ function LockedView({ onSignOut }: { onSignOut: () => void }) {
 function SelfVerifiedView({
   onRefresh,
   isRefreshing,
-  onSignOut,
 }: {
   onRefresh: () => void;
   isRefreshing: boolean;
-  onSignOut: () => void;
 }) {
   return (
     <>
-      <p style={{ ...s.siteLabel, marginBottom: "10px" }}>
-        VERIFICATION // IN PROGRESS
-      </p>
-      <h1 style={{ ...s.heading, fontSize: "clamp(30px,8vw,42px)", marginBottom: "28px" }}>
-        PARTNER{"\n"}VERIFIED.
+      <h1 style={{ ...s.heading, fontSize: "42px" }}>
+        PARTNER<br />VERIFIED.
       </h1>
-
       <div style={s.successBox}>
-        <div>
-          <span style={s.dot} />
-          Partner verified.
-        </div>
-        <div style={{ marginTop: "8px" }}>
-          Waiting for your partner to verify you.
-        </div>
+        <div><span style={s.dot} />Partner verified.</div>
+        <div style={{ marginTop: "8px" }}>Waiting for your partner to verify you.</div>
       </div>
-
       <button
         id="btn-refresh-status"
         type="button"
@@ -766,11 +703,6 @@ function SelfVerifiedView({
       >
         {isRefreshing ? "[ REFRESHING... ]" : "[ REFRESH STATUS ]"}
       </button>
-
-      <button id="btn-sign-out-self-verified" type="button" style={s.secondaryBtn} onClick={onSignOut}>
-        [ SIGN OUT ]
-      </button>
-
       <div style={s.statusBar}>
         <div>&gt;&gt; SELF_VERIFIED: TRUE...</div>
         <div>&gt;&gt; PARTNER_VERIFIED: PENDING...</div>
@@ -780,38 +712,13 @@ function SelfVerifiedView({
   );
 }
 
-function MutualVerifiedView({ onSignOut }: { onSignOut: () => void }) {
+function MutualVerifiedView() {
   return (
     <>
-      <p style={{ ...s.siteLabel, marginBottom: "10px" }}>
-        VERIFICATION // COMPLETE
-      </p>
-      <h1 style={{ ...s.heading, fontSize: "clamp(28px,7vw,38px)", marginBottom: "28px" }}>
-        CONNECTION{"\n"}ESTABLISHED.
+      <h1 style={{ ...s.heading, fontSize: "clamp(28px, 8vw, 38px)" }}>
+        CONNECTION ESTABLISHED
       </h1>
-
-      <div style={s.successBox}>
-        <div>
-          <span style={s.dot} />
-          Both participants verified.
-        </div>
-      </div>
-
-      <p style={s.subtext}>
-        Both participants verified.
-        <br />
-        Stand by for further instructions.
-      </p>
-
-      <button id="btn-sign-out-mutual" type="button" style={s.secondaryBtn} onClick={onSignOut}>
-        [ SIGN OUT ]
-      </button>
-
-      <div style={s.statusBar}>
-        <div>&gt;&gt; MUTUAL_VERIFIED: TRUE...</div>
-        <div>&gt;&gt; CONNECTION_ESTABLISHED.</div>
-        <div>&gt;&gt; GOOD_LUCK.</div>
-      </div>
+      <p style={s.subtext}>Both participants verified.</p>
     </>
   );
 }
@@ -819,20 +726,15 @@ function MutualVerifiedView({ onSignOut }: { onSignOut: () => void }) {
 function NotRegisteredView({ onSignOut }: { onSignOut: () => void }) {
   return (
     <>
-      <h1 style={s.heading}>ACCESS{"\n"}DENIED.</h1>
+      <h1 style={s.heading}>ACCESS<br/>DENIED.</h1>
       <p style={s.subtext}>
-        Your Google account is not on the approved participant list for this
-        event.
-        <br />
-        <br />
-        If you registered with a different email address, sign out and try again
-        with the correct Google account.
+        Your Google account is not on the approved participant list for this event.
+        <br /><br />
+        If you registered with a different email address, sign out and try again with the correct Google account.
       </p>
-
       <button id="btn-sign-out-not-registered" type="button" style={s.secondaryBtn} onClick={onSignOut}>
         [ SIGN OUT AND TRY AGAIN ]
       </button>
-
       <div style={s.statusBar}>
         <div>&gt;&gt; IDENTITY_NOT_FOUND...</div>
         <div>&gt;&gt; ACCESS_DENIED.</div>
@@ -844,18 +746,15 @@ function NotRegisteredView({ onSignOut }: { onSignOut: () => void }) {
 function DeniedView({ onSignOut }: { onSignOut: () => void }) {
   return (
     <>
-      <h1 style={s.heading}>LINK{"\n"}ERROR.</h1>
+      <h1 style={s.heading}>LINK<br/>ERROR.</h1>
       <p style={s.subtext}>
         There was a problem linking your account.
-        <br />
-        <br />
+        <br /><br />
         If this keeps happening, contact an event organizer.
       </p>
-
       <button id="btn-sign-out-denied" type="button" style={s.secondaryBtn} onClick={onSignOut}>
         [ SIGN OUT ]
       </button>
-
       <div style={s.statusBar}>
         <div>&gt;&gt; LINKING_DENIED...</div>
         <div>&gt;&gt; CONTACT_ORGANIZER.</div>
@@ -875,19 +774,14 @@ function ErrorView({
 }) {
   return (
     <>
-      <h1 style={s.heading}>TRANSMISSION{"\n"}FAILED.</h1>
-      <p style={s.subtext}>
-        {message ?? "An unexpected error occurred. Please try again."}
-      </p>
-
+      <h1 style={s.heading}>TRANSMISSION<br/>FAILED.</h1>
+      <p style={s.subtext}>{message ?? "An unexpected error occurred. Please try again."}</p>
       <button id="btn-retry" type="button" style={s.primaryBtn} onClick={onRetry}>
         [ TRY AGAIN ]
       </button>
-
       <button id="btn-sign-out-error" type="button" style={s.secondaryBtn} onClick={onSignOut}>
         [ SIGN OUT ]
       </button>
-
       <div style={s.statusBar}>
         <div>&gt;&gt; CONNECTION_FAILED...</div>
         <div>&gt;&gt; RETRY_OR_SIGN_OUT.</div>
@@ -896,21 +790,9 @@ function ErrorView({
   );
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/** Monochrome Google "G" icon — matches the button's dark text colour */
 function GoogleIcon() {
   return (
-    <svg
-      width="17"
-      height="17"
-      viewBox="0 0 24 24"
-      fill={BG}
-      aria-hidden="true"
-      style={{ flexShrink: 0 }}
-    >
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="var(--bg)" aria-hidden="true" style={{ flexShrink: 0 }}>
       <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
       <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
       <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z" />
