@@ -125,7 +125,9 @@ export function createUploadHandler(deps: Dependencies) {
         public_id: claim.photo_public_id, timestamp: String(Math.floor(Date.now() / 1000)),
       };
       const canonical = Object.keys(params).sort().map(k => `${k}=${params[k]}`).join('&');
-      const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(canonical + secret));
+      // Cloudinary's default signing algorithm is SHA-1 (produces a 40-char hex digest).
+      // SHA-256 produces a 64-char digest that Cloudinary rejects with 401 Invalid Signature.
+      const hash = await crypto.subtle.digest('SHA-1', new TextEncoder().encode(canonical + secret));
       const signature = [...new Uint8Array(hash)].map(n => n.toString(16).padStart(2, '0')).join('');
       const upload = new FormData();
       for (const [name, value] of Object.entries(params)) upload.set(name, value);
@@ -134,7 +136,17 @@ export function createUploadHandler(deps: Dependencies) {
       const response = await deps.fetch(`https://api.cloudinary.com/v1_1/${cloud}/image/upload`, {
         method: 'POST', body: upload, signal: AbortSignal.timeout(60000),
       });
-      if (!response.ok) throw new UploadError(502, 'UPLOAD_FAILED', 'Photo upload failed. Please retry with a valid photo.');
+      if (!response.ok) {
+        // Safe diagnostic: log Cloudinary's status and error message only — never credentials or signature.
+        try {
+          const errBody: unknown = await response.clone().json();
+          const errMsg = (errBody && typeof errBody === 'object' && 'error' in errBody &&
+            errBody.error && typeof errBody.error === 'object' && 'message' in errBody.error)
+            ? String((errBody.error as Record<string, unknown>).message) : '(no message)';
+          console.error(`[upload-pair-photo] Cloudinary rejected upload: HTTP ${response.status} – ${errMsg}`);
+        } catch { console.error(`[upload-pair-photo] Cloudinary rejected upload: HTTP ${response.status}`); }
+        throw new UploadError(502, 'UPLOAD_FAILED', 'Photo upload failed. Please retry with a valid photo.');
+      }
       const asset: unknown = await response.json();
       if (!record(asset) || asset.public_id !== claim.photo_public_id || asset.resource_type !== 'image' ||
           asset.format !== 'jpg' || typeof asset.secure_url !== 'string') {

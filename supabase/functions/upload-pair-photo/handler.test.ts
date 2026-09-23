@@ -30,7 +30,9 @@ function harness(options: { claim?: string; missingCloud?: boolean; authFail?: b
       assert.equal(body.get('overwrite'), 'false');
       assert.equal(body.get('public_id'), publicId);
       assert.equal(body.get('format'), 'jpg');
-      assert.match(String(body.get('signature')), /^[a-f0-9]{64}$/);
+      // Cloudinary uses SHA-1 by default: 40-char hex digest.
+      // Regression: SHA-256 (64-char) was previously used and caused HTTP 401 Invalid Signature → 502.
+      assert.match(String(body.get('signature')), /^[a-f0-9]{40}$/);
       assert.equal(body.has('api_secret'), false);
       return Response.json({ resource_type: 'image', format: 'jpg', public_id: options.wrongAsset ? 'other' : publicId,
         secure_url: `https://res.cloudinary.com/test-cloud/image/upload/v1/${publicId}.jpg` }, { status: options.uploadFail ? 400 : 200 });
