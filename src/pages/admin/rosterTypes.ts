@@ -25,7 +25,7 @@ export interface RosterPayloadRow {
   row_number: number;
   name: string;
   email: string;
-  branch: string;
+  branch: string | null;
 }
 
 // ── Backend preview response ─────────────────────────────────────────────────
@@ -64,3 +64,26 @@ export type PreviewState =
   | { status: "loading" }
   | { status: "success"; rows: PreviewResultRow[] }
   | { status: "error"; message: string };
+
+// ---------------------------------------------------------------------------
+// Import Result
+// ---------------------------------------------------------------------------
+
+export interface ImportResult {
+  success: boolean;
+  imported: number;
+  updated: number;
+  skipped: number;
+}
+
+// ---------------------------------------------------------------------------
+// Roster List
+// ---------------------------------------------------------------------------
+
+export interface AdminParticipantRow {
+  participant_code: string;
+  name: string;
+  branch: string | null;
+  registered_email: string;
+  is_linked: boolean;
+}

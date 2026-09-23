@@ -15,6 +15,8 @@ import type {
   PreviewCategory,
   PreviewState,
   RosterPayloadRow,
+  AdminParticipantRow,
+  ImportResult,
 } from "./rosterTypes";
 
 // ---------------------------------------------------------------------------
@@ -128,7 +130,52 @@ export default function AdminHome() {
 // Admin dashboard (is_admin confirmed)
 // ---------------------------------------------------------------------------
 
+
 function AdminDashboard({ onSignOut }: { onSignOut: () => void }) {
+  const [roster, setRoster] = useState<AdminParticipantRow[] | null>(null);
+  const [isRosterLoading, setIsRosterLoading] = useState(false);
+  const [rosterError, setRosterError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchRoster();
+  }, []);
+
+  async function fetchRoster() {
+    setIsRosterLoading(true);
+    setRosterError(null);
+    const { data, error } = await supabase.rpc("admin_list_participants");
+    setIsRosterLoading(false);
+    if (error) {
+      console.error(error);
+      setRosterError("Failed to load roster.");
+      return;
+    }
+
+    if (!Array.isArray(data)) {
+      setRosterError("Unexpected response from server.");
+      return;
+    }
+
+    const validRoster: AdminParticipantRow[] = [];
+    for (const item of data) {
+      if (typeof item !== "object" || item === null) continue;
+      const r = item as Record<string, unknown>;
+      if (typeof r.participant_code === "string" && typeof r.name === "string" &&
+          (typeof r.branch === "string" || r.branch === null) &&
+          typeof r.registered_email === "string" && typeof r.is_linked === "boolean") {
+        validRoster.push({
+          participant_code: r.participant_code,
+          name: r.name,
+          branch: r.branch,
+          registered_email: r.registered_email,
+          is_linked: r.is_linked
+        });
+      }
+    }
+
+    setRoster(validRoster);
+  }
+
   return (
     <div style={{ width: "100%", maxWidth: "1100px", padding: "32px 24px", boxSizing: "border-box" }}>
       {/* Header bar */}
@@ -143,27 +190,22 @@ function AdminDashboard({ onSignOut }: { onSignOut: () => void }) {
             ORGANIZER DASHBOARD
           </div>
         </div>
-        <button
-          id="btn-admin-sign-out"
-          type="button"
-          onClick={onSignOut}
-          style={secondaryBtnStyle}
-        >
+        <button id="btn-admin-sign-out" type="button" onClick={onSignOut} style={secondaryBtnStyle}>
           [ SIGN OUT ]
         </button>
       </div>
 
-      {/* Roster section */}
-      <RosterSection />
+      <RosterSection onImportSuccess={fetchRoster} />
+
+      <AdminRosterList roster={roster} isLoading={isRosterLoading} error={rosterError} onRefresh={fetchRoster} />
     </div>
   );
 }
-
 // ---------------------------------------------------------------------------
 // Roster section — the main Phase 1 feature
 // ---------------------------------------------------------------------------
 
-function RosterSection() {
+function RosterSection({ onImportSuccess }: { onImportSuccess: () => void }) {
   // ── File / CSV state ────────────────────────────────────────────────────
   const [csv, setCsv]             = useState<ParsedCsv | null>(null);
   const [csvError, setCsvError]   = useState<string | null>(null);
@@ -180,14 +222,27 @@ function RosterSection() {
   // Keep the payload that generated the current preview for email display
   const [previewPayload, setPreviewPayload] = useState<RosterPayloadRow[]>([]);
 
+  const [isSuspiciousAcknowledged, setIsSuspiciousAcknowledged] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+  const [importResult, setImportResult] = useState<ImportResult | null>(null);
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+
+
   // Reset all derived state whenever the CSV changes
   function resetToFile() {
     setCsv(null);
     setCsvError(null);
     setFileName(null);
     setMapping({ name: null, email: null, branch: null });
+
     setPreview({ status: "idle" });
     setPreviewPayload([]);
+    setIsSuspiciousAcknowledged(false);
+    setImportResult(null);
+    setImportError(null);
+    setShowConfirmModal(false);
+
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
@@ -200,8 +255,14 @@ function RosterSection() {
     setCsv(null);
     setCsvError(null);
     setMapping({ name: null, email: null, branch: null });
+
     setPreview({ status: "idle" });
     setPreviewPayload([]);
+    setIsSuspiciousAcknowledged(false);
+    setImportResult(null);
+    setImportError(null);
+    setShowConfirmModal(false);
+
     setFileName(file.name);
     setIsParsing(true);
 
@@ -281,6 +342,54 @@ function RosterSection() {
     }
 
     setPreview({ status: "success", rows });
+  }
+
+
+  // ── Import RPC ───────────────────────────────────────────────────────────
+  async function handleConfirmImport() {
+    setIsImporting(true);
+    setImportError(null);
+    const { data, error } = await supabase.rpc("admin_import_roster", { payload: previewPayload });
+    setIsImporting(false);
+    setShowConfirmModal(false);
+
+    if (error) {
+      console.error(error);
+      setImportError("We couldn't confirm whether the import completed. Refresh the roster and run a fresh preview before trying again.");
+      return;
+    }
+
+    if (typeof data !== "object" || data === null) {
+      setImportError("Unexpected response format from server. Refresh the roster and try again.");
+      return;
+    }
+
+    const r = data as Record<string, unknown>;
+    if (r.success !== true ||
+        typeof r.imported !== "number" || r.imported < 0 || !Number.isFinite(r.imported) ||
+        typeof r.updated !== "number" || r.updated < 0 || !Number.isFinite(r.updated) ||
+        typeof r.skipped !== "number" || r.skipped < 0 || !Number.isFinite(r.skipped)) {
+      setImportError("Invalid success confirmation from server. Refresh the roster and try again.");
+      return;
+    }
+
+    setImportResult({
+      success: true,
+      imported: r.imported,
+      updated: r.updated,
+      skipped: r.skipped
+    });
+    // Explicitly reset UI to success state
+    setCsv(null);
+    setCsvError(null);
+    setFileName(null);
+    setMapping({ name: null, email: null, branch: null });
+    setPreview({ status: "idle" });
+    setPreviewPayload([]);
+    setIsSuspiciousAcknowledged(false);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+
+    onImportSuccess();
   }
 
   // ── Computed summary counts ──────────────────────────────────────────────
@@ -399,7 +508,115 @@ function RosterSection() {
           <PreviewResults rows={preview.rows} payloadMap={Object.fromEntries(previewPayload.map(r => [r.row_number, r]))} />
         </SectionBlock>
       )}
+
+      {/* ── Import Success / Error ── */}
+      {importResult && (
+        <SectionBlock label="05  IMPORT COMPLETE">
+          <div style={{ fontSize: "13px", color: GREEN_DIM, lineHeight: "1.8" }}>
+            <span style={{ color: GREEN, fontWeight: "bold" }}>Import complete</span><br /><br />
+            Imported: {importResult.imported}<br />
+            Updated: {importResult.updated}<br />
+            Skipped: {importResult.skipped}<br />
+            <br />
+            {importResult.success && <span style={{ color: GREEN }}>Roster refreshed.</span>}
+          </div>
+        </SectionBlock>
+      )}
+
+      {importError && (
+        <SectionBlock label="05  IMPORT FAILED">
+          <ErrorBox message={importError} />
+        </SectionBlock>
+      )}
+
+      {/* ── Confirm Import ── */}
+      {preview.status === "success" && !importResult && (
+        <SectionBlock label="05  CONFIRM IMPORT">
+          {(() => {
+            const counts = {
+              new_: preview.rows.filter((r) => r.category === "NEW").length,
+              updates: preview.rows.filter((r) => r.category === "DETAILS_UPDATE").length,
+              skipped: preview.rows.filter((r) => r.category === "UNCHANGED" || r.category === "ALREADY_ACTIVE").length,
+              problems: preview.rows.filter((r) => r.is_blocking).length,
+              warnings: preview.rows.filter((r) => r.is_suspicious_email && !r.is_blocking).length,
+            };
+            const isEligible = counts.problems === 0 && (!counts.warnings || isSuspiciousAcknowledged) && !isImporting;
+
+            return (
+              <div>
+                <div style={{ fontSize: "13px", color: GREEN_DIM, marginBottom: "20px", lineHeight: "1.7" }}>
+                  New participants: {counts.new_}<br />
+                  Details updates: {counts.updates}<br />
+                  Skipped: {counts.skipped}<br />
+                  <span style={{ color: counts.problems > 0 ? RED : GREEN_DIM }}>Blocking problems: {counts.problems}</span><br />
+                  <span style={{ color: counts.warnings > 0 ? AMBER : GREEN_DIM }}>Warnings: {counts.warnings}</span><br />
+                </div>
+
+                {counts.warnings > 0 && (
+                  <label style={{ display: "flex", alignItems: "center", gap: "10px", fontSize: "13px", color: AMBER, marginBottom: "20px", cursor: "pointer" }}>
+                    <input
+                      type="checkbox"
+                      checked={isSuspiciousAcknowledged}
+                      onChange={(e) => setIsSuspiciousAcknowledged(e.target.checked)}
+                      disabled={isImporting}
+                    />
+                    I reviewed the flagged email addresses and want to continue.
+                  </label>
+                )}
+
+                {!showConfirmModal ? (
+                  <div style={{ display: "flex", alignItems: "center", gap: "16px", flexWrap: "wrap" }}>
+                    <button
+                      type="button"
+                      onClick={() => setShowConfirmModal(true)}
+                      disabled={!isEligible}
+                      style={{
+                        ...(isEligible ? primaryBtnStyle : secondaryBtnStyle),
+                        width: "auto",
+                        opacity: isEligible ? 1 : 0.4,
+                        cursor: isEligible ? "pointer" : "not-allowed",
+                        margin: 0,
+                      }}
+                    >
+                      [ CONFIRM IMPORT ]
+                    </button>
+                    {!isEligible && counts.problems > 0 && (
+                      <span style={{ fontSize: "12px", color: RED }}>
+                        Fix the {counts.problems} blocking {counts.problems === 1 ? "row" : "rows"} before importing.
+                      </span>
+                    )}
+                    {!isEligible && counts.problems === 0 && counts.warnings > 0 && !isSuspiciousAcknowledged && (
+                      <span style={{ fontSize: "12px", color: AMBER }}>
+                        Review and acknowledge the flagged email addresses before importing.
+                      </span>
+                    )}
+                  </div>
+                ) : (
+                  <div style={{ padding: "20px", border: `1px solid ${GREEN}`, background: BG, marginTop: "20px" }}>
+                    <div style={{ fontSize: "14px", fontWeight: "bold", marginBottom: "16px", color: GREEN }}>Import roster?</div>
+                    <div style={{ fontSize: "13px", color: GREEN_DIM, marginBottom: "24px", lineHeight: "1.6" }}>
+                      {counts.new_} new participants<br />
+                      {counts.updates} details updates<br />
+                      {counts.skipped} unchanged/already active<br />
+                      <br />
+                      This will update the event roster.
+                      {counts.warnings > 0 && isSuspiciousAcknowledged && <div style={{ color: AMBER, marginTop: "8px" }}>Flagged addresses acknowledged.</div>}
+                    </div>
+                    <div style={{ display: "flex", gap: "16px" }}>
+                      <button type="button" onClick={() => setShowConfirmModal(false)} disabled={isImporting} style={{ ...secondaryBtnStyle, width: "auto" }}>[ CANCEL ]</button>
+                      <button type="button" onClick={handleConfirmImport} disabled={isImporting} style={{ ...primaryBtnStyle, width: "auto", margin: 0 }}>
+                        {isImporting ? "[ IMPORTING ROSTER... ]" : "[ IMPORT ROSTER ]"}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+        </SectionBlock>
+      )}
     </section>
+
   );
 }
 
@@ -778,5 +995,140 @@ function GoogleIcon() {
       <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z" />
       <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
     </svg>
+  );
+}
+
+
+// ---------------------------------------------------------------------------
+// Roster List Component
+// ---------------------------------------------------------------------------
+
+function AdminRosterList({
+  roster,
+  isLoading,
+  error,
+  onRefresh
+}: {
+  roster: AdminParticipantRow[] | null;
+  isLoading: boolean;
+  error: string | null;
+  onRefresh: () => void;
+}) {
+  const [searchQuery, setSearchQuery] = useState("");
+  const [branchFilter, setBranchFilter] = useState("ALL");
+
+  if (isLoading && !roster) {
+    return <SectionBlock label="ROSTER LIST"><StatusLine text="Loading roster..." /></SectionBlock>;
+  }
+  if (error) {
+    return (
+      <SectionBlock label="ROSTER LIST">
+        <ErrorBox message={error} />
+        <button type="button" onClick={onRefresh} style={{ ...secondaryBtnStyle, width: "auto", marginTop: "16px" }}>
+          [ RETRY REFRESH ]
+        </button>
+      </SectionBlock>
+    );
+  }
+  if (!roster) return null;
+
+  // Compute branches dynamically, excluding null/blank
+  const branches = Array.from(new Set(roster.map(r => r.branch).filter((b): b is string => !!b))).sort();
+
+  // Filter logic
+  const filtered = roster.filter(r => {
+    if (branchFilter !== "ALL" && r.branch !== branchFilter) return false;
+    if (searchQuery.trim()) {
+      const q = searchQuery.trim().toLowerCase();
+      if (!r.name.toLowerCase().includes(q) &&
+          !r.registered_email.toLowerCase().includes(q) &&
+          !r.participant_code.toLowerCase().includes(q)) {
+        return false;
+      }
+    }
+    return true;
+  });
+
+  return (
+    <section aria-labelledby="roster-list-heading">
+      <SectionBlock label="ROSTER LIST">
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: "16px", marginBottom: "24px" }}>
+          <div style={{ fontSize: "13px", color: GREEN_DIM }}>
+            Total Participants: <span style={{ color: GREEN, fontWeight: "bold" }}>{roster.length}</span>
+          </div>
+          <button type="button" onClick={onRefresh} disabled={isLoading} style={{ ...secondaryBtnStyle, width: "auto", padding: "8px 16px", fontSize: "11px" }}>
+            {isLoading ? "[ REFRESHING... ]" : "[ REFRESH ]"}
+          </button>
+        </div>
+
+        {/* Filters */}
+        <div style={{ display: "flex", gap: "16px", marginBottom: "24px", flexWrap: "wrap" }}>
+          <label style={{ display: "flex", flexDirection: "column", gap: "6px", flex: "1 1 200px" }}>
+            <span style={{ fontSize: "11px", color: GREEN_DIM }}>SEARCH</span>
+            <input
+              type="text"
+              placeholder="Name, Email, or ID"
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              style={{
+                fontFamily: MONO, fontSize: "13px", color: GREEN,
+                background: BG, border: `1px solid ${GREEN_DIM}`,
+                padding: "8px 12px", outline: "none"
+              }}
+            />
+          </label>
+          <label style={{ display: "flex", flexDirection: "column", gap: "6px", flex: "1 1 200px" }}>
+            <span style={{ fontSize: "11px", color: GREEN_DIM }}>BRANCH</span>
+            <select
+              value={branchFilter}
+              onChange={e => setBranchFilter(e.target.value)}
+              style={{
+                fontFamily: MONO, fontSize: "13px", color: GREEN,
+                background: BG, border: `1px solid ${GREEN_DIM}`,
+                padding: "8px 12px", outline: "none"
+              }}
+            >
+              <option value="ALL">All branches</option>
+              {branches.map(b => (
+                <option key={b} value={b}>{b}</option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        {/* Table */}
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px", letterSpacing: "0.02em" }}>
+            <thead>
+              <tr style={{ borderBottom: `1px solid ${GREEN_FAINT}` }}>
+                {["Participant ID", "Name", "Branch", "Email", "Account"].map(col => (
+                  <th key={col} style={{ textAlign: "left", padding: "8px 12px", color: GREEN_DIM, fontWeight: "normal", fontSize: "11px" }}>
+                    {col.toUpperCase()}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map(r => (
+                <tr key={r.participant_code} style={{ borderBottom: `1px solid ${GREEN_FAINT}` }}>
+                  <td style={{ padding: "10px 12px", color: GREEN }}>{r.participant_code}</td>
+                  <td style={{ padding: "10px 12px", color: GREEN }}>{r.name}</td>
+                  <td style={{ padding: "10px 12px", color: GREEN }}>{r.branch || "—"}</td>
+                  <td style={{ padding: "10px 12px", color: GREEN }}>{r.registered_email}</td>
+                  <td style={{ padding: "10px 12px", color: GREEN_DIM }}>{r.is_linked ? "Linked" : "Not linked"}</td>
+                </tr>
+              ))}
+              {filtered.length === 0 && (
+                <tr>
+                  <td colSpan={5} style={{ padding: "20px", textAlign: "center", color: GREEN_DIM }}>
+                    No participants found matching filters.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </SectionBlock>
+    </section>
   );
 }
