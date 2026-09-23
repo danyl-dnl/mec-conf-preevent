@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { isAnswerResult, isLevel1State, type Level1State } from './types';
+import PairPhotoUpload from './PairPhotoUpload';
 import './level1.css';
 
-export default function ParticipantPuzzle({ refreshToken }: { refreshToken: number }) {
+export default function ParticipantPuzzle({ refreshToken, onCompletedChange }: { refreshToken: number; onCompletedChange: (completed: boolean) => void }) {
   const [state, setState] = useState<Level1State | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -20,6 +21,7 @@ export default function ParticipantPuzzle({ refreshToken }: { refreshToken: numb
       if (version !== request.current) return;
       setMessage('');
       setState(data);
+      onCompletedChange(data.completed);
       setFailed(false);
     } catch {
       if (version !== request.current) return;
@@ -28,7 +30,7 @@ export default function ParticipantPuzzle({ refreshToken }: { refreshToken: numb
     } finally {
       if (version === request.current) setLoading(false);
     }
-  }, []);
+  }, [onCompletedChange]);
   useEffect(() => {
     // eslint-disable-next-line react/set-state-in-effect -- Refresh synchronizes RPC state; updates follow the network response.
     void refresh();
@@ -81,9 +83,16 @@ export default function ParticipantPuzzle({ refreshToken }: { refreshToken: numb
           <button disabled={busy || !answer.trim()}>{busy ? 'VERIFYING...' : 'VERIFY GRID'}</button>
         </form>
       </>}
-      {state?.status === 'SOLVED' && <div role="status">
+      {state?.status === 'SOLVED' && <div>
         <h3>GRID VERIFIED</h3>
-        <p>Level 1 puzzle solved.<br />Pair photo required to complete Level 1.</p>
+        <p>Level 1 puzzle solved.</p>
+        <PairPhotoUpload onComplete={refresh} onBusyChange={setBusy} />
+      </div>}
+      {state?.status === 'COMPLETED' && <div role="status">
+        <h2>TRANSMISSION COMPLETE</h2>
+        <h3>LEVEL 1 COMPLETE</h3>
+        <p>Your pair has successfully completed the challenge.</p>
+        <p>{state.participant_code} · FRAGMENT {state.fragment_slot}</p>
       </div>}
     </>}
     {message && <p className="level1-message" role="alert">{message}</p>}

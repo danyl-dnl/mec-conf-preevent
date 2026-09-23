@@ -258,6 +258,7 @@ export default function ParticipantHome() {
   const [linkStatus, setLinkStatus] = useState<LinkStatus>("loading");
   const verifyInFlight = useRef(false);
   const [puzzleRefresh, setPuzzleRefresh] = useState(0);
+  const [level1Completed, setLevel1Completed] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const [pairStatus, setPairStatus] = useState<PairStatus>("loading_pair");
@@ -400,6 +401,7 @@ export default function ParticipantHome() {
     await supabase.auth.signOut();
     setErrorMessage(null);
     setPairState(null);
+    setLevel1Completed(false);
     setPairStatus("loading_pair");
     setPartnerCodeInput("");
     setLinkStatus("unauthenticated");
@@ -434,7 +436,8 @@ export default function ParticipantHome() {
 
         {linkStatus === "linked" && (
           <>
-            <ParticipantPuzzle refreshToken={puzzleRefresh} />
+            <ParticipantPuzzle refreshToken={puzzleRefresh} onCompletedChange={setLevel1Completed} />
+            {!level1Completed && <>
             {pairStatus === "loading_pair" && <LoadingView />}
 
             {pairStatus === "NOT_PAIRED" && (
@@ -479,6 +482,7 @@ export default function ParticipantHome() {
             {pairStatus === "MUTUAL_VERIFIED" && (
               <MutualVerifiedView />
             )}
+            </>}
           </>
         )}
 

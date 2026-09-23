@@ -13,7 +13,7 @@ function keys(value: Record<string, unknown>, allowed: string[]) {
 const nonblank = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0;
 const timestamp = (value: unknown): value is string => typeof value === 'string' && Number.isFinite(Date.parse(value));
 export type Level1State = {
-  status: 'NOT_PAIRED' | 'NO_PUZZLE' | 'FIND_PARTNER' | 'READY_TO_SOLVE' | 'SOLVED';
+  status: 'NOT_PAIRED' | 'NO_PUZZLE' | 'FIND_PARTNER' | 'READY_TO_SOLVE' | 'SOLVED' | 'COMPLETED';
   participant_code: string;
   name: string;
   fragment_slot?: 'A' | 'B';
@@ -21,16 +21,25 @@ export type Level1State = {
   mutual_verified?: boolean;
   solved?: boolean;
   solved_at?: string;
+  photo_uploaded: boolean;
+  completed: boolean;
+  completed_at: string | null;
 };
 export function isLevel1State(value: unknown): value is Level1State {
   if (!isRecord(value) || !nonblank(value.name) || !nonblank(value.participant_code)) return false;
-  const base = ['status', 'participant_code', 'name'];
-  if (value.status === 'NOT_PAIRED') return keys(value, base);
+  if (typeof value.photo_uploaded !== 'boolean' || typeof value.completed !== 'boolean' ||
+      value.photo_uploaded !== value.completed ||
+      (value.completed ? !timestamp(value.completed_at) : value.completed_at !== null)) return false;
+  const base = ['status', 'participant_code', 'name', 'photo_uploaded', 'completed', 'completed_at'];
+  if (value.status === 'NOT_PAIRED') return keys(value, base) && !value.completed;
   const paired = [...base, 'fragment_slot', 'mutual_verified', 'solved'];
   if (!['A', 'B'].includes(String(value.fragment_slot)) || typeof value.mutual_verified !== 'boolean' ||
       typeof value.solved !== 'boolean') return false;
-  if (value.status === 'NO_PUZZLE') return keys(value, paired) && value.solved === false;
+  if (value.status === 'NO_PUZZLE') return keys(value, paired) && value.solved === false && !value.completed;
   if (!isGrid(value.assigned_grid)) return false;
+  if (value.status === 'COMPLETED') return keys(value, [...paired, 'assigned_grid', 'solved_at']) &&
+    value.solved === true && value.completed === true && timestamp(value.solved_at);
+  if (value.completed) return false;
   if (value.status === 'SOLVED') return keys(value, [...paired, 'assigned_grid', 'solved_at']) &&
     value.solved === true && timestamp(value.solved_at);
   return keys(value, [...paired, 'assigned_grid']) && value.solved === false &&
@@ -48,4 +57,10 @@ export function isPuzzleList(value: unknown): value is PuzzleMetadata[] {
     keys(row, ['puzzle_code', 'grid_rows', 'grid_columns', 'assigned_pair_count']) && nonblank(row.puzzle_code) &&
     [row.grid_rows, row.grid_columns].every(n => typeof n === 'number' && Number.isInteger(n) && n >= 1 && n <= 10) &&
     typeof row.assigned_pair_count === 'number' && Number.isSafeInteger(row.assigned_pair_count) && row.assigned_pair_count >= 0);
+}
+
+export interface CompletionResult { status: 'COMPLETED'; completed_at: string }
+export function isCompletionResult(value: unknown): value is CompletionResult {
+  return isRecord(value) && keys(value, ['status', 'completed_at']) &&
+    value.status === 'COMPLETED' && timestamp(value.completed_at);
 }
