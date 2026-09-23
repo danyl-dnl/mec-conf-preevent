@@ -367,6 +367,16 @@ class VerificationTests(unittest.TestCase):
         data2 = json.loads(result2) if isinstance(result2, str) else result2
         self.assertEqual(data2["status"], "VERIFIED")
 
+    def test_admin_reset_unpaired_checks_row_count(self):
+        admin_uid = self.create_admin()
+        self.create_participant("UNPAIRED")
+        _, error = self.sql(
+            f"SET request.jwt.claim.sub = '{admin_uid}'; SET ROLE authenticated; "
+            "SELECT public.admin_reset_partner_verification('UNPAIRED')",
+            success=False,
+        )
+        self.assertIn("is not in any pair", error)
+
     def test_admin_reset_does_not_affect_partner(self):
         admin_uid = self.create_admin()
         uid_a = self.create_participant("RP1")
