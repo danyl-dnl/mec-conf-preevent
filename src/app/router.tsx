@@ -1,5 +1,6 @@
 import { createBrowserRouter } from "react-router-dom";
 import ParticipantHome from "../pages/participant/ParticipantHome";
+import AdminHome from "../pages/admin/AdminHome";
 
 const router = createBrowserRouter([
   {
@@ -8,7 +9,7 @@ const router = createBrowserRouter([
   },
   {
     path: "/admin",
-    element: <h1>MEC CONF Pre-Event — Admin Portal</h1>,
+    element: <AdminHome />,
   },
   {
     path: "*",
