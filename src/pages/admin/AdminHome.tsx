@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useId } from "react";
+import AdminPuzzles from "../../features/level1/AdminPuzzles";
 import { supabase } from "../../lib/supabase";
 import {
   parseCsvFile,
@@ -203,6 +204,7 @@ function AdminDashboard({ onSignOut }: { onSignOut: () => void }) {
       <AdminRosterList roster={roster} isLoading={isRosterLoading} error={rosterError} onRefresh={fetchRoster} />
 
       <PairSection />
+      <AdminPuzzles />
     </div>
   );
 }

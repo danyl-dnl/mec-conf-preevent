@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import ParticipantPuzzle from "../../features/level1/ParticipantPuzzle";
 import { supabase } from "../../lib/supabase";
 import { isPairState, isVerifyResult, type PairState } from "./verificationState";
 import "../../index.css"; // Ensure styles are loaded
@@ -256,6 +257,7 @@ const s = {
 export default function ParticipantHome() {
   const [linkStatus, setLinkStatus] = useState<LinkStatus>("loading");
   const verifyInFlight = useRef(false);
+  const [puzzleRefresh, setPuzzleRefresh] = useState(0);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const [pairStatus, setPairStatus] = useState<PairStatus>("loading_pair");
@@ -279,6 +281,7 @@ export default function ParticipantHome() {
       return;
     }
     setPairState(ps);
+    setPuzzleRefresh(value => value + 1);
 
     if (ps.status === "NOT_PAIRED") {
       setPairStatus("NOT_PAIRED");
@@ -364,6 +367,7 @@ export default function ParticipantHome() {
       setAttemptsRemaining(remaining);
 
       if (result.status === "VERIFIED") {
+        setPuzzleRefresh(value => value + 1);
         if (result.mutual_verified) {
           setPairStatus("MUTUAL_VERIFIED");
         } else {
@@ -430,6 +434,7 @@ export default function ParticipantHome() {
 
         {linkStatus === "linked" && (
           <>
+            <ParticipantPuzzle refreshToken={puzzleRefresh} />
             {pairStatus === "loading_pair" && <LoadingView />}
 
             {pairStatus === "NOT_PAIRED" && (

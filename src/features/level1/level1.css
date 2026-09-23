@@ -1,0 +1,17 @@
+.level1-section { margin: 24px 0; padding: 20px 0; border-top: 1px solid var(--green-dim); min-width: 0; }
+.level1-section h2 { font-size: 22px; margin: 0 0 16px; }
+.level1-section h3 { font-size: 16px; margin: 20px 0 12px; }
+.level1-section p { line-height: 1.7; font-size: 14px; }
+.level1-section label { display: block; margin: 14px 0; font-size: 13px; }
+.level1-section input, .level1-section textarea, .level1-section select {
+  display: block; box-sizing: border-box; width: 100%; margin-top: 8px; padding: 12px;
+  background: var(--bg); color: var(--green); border: 1px solid var(--green-dim); font: inherit; font-size: 16px;
+}
+.level1-section button { background: var(--green); color: var(--bg); border: 1px solid var(--green); padding: 12px 16px; font: inherit; cursor: pointer; min-height: 44px; margin: 8px 8px 8px 0; }
+.level1-section button:disabled { opacity: .5; cursor: not-allowed; }
+.level1-section :focus-visible { outline: 2px solid var(--green); outline-offset: 3px; }
+.level1-grid-scroll { overflow-x: auto; margin: 20px 0; }
+.level1-grid { border-collapse: collapse; width: 100%; table-layout: fixed; }
+.level1-grid td { border: 1px solid var(--green); min-width: 44px; height: 52px; padding: 6px; text-align: center; font-size: 22px; overflow-wrap: anywhere; }
+.level1-message { border: 1px solid var(--green-dim); padding: 12px; overflow-wrap: anywhere; }
+.level1-admin-forms { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 28px; }
