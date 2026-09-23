@@ -15,3 +15,8 @@
 .level1-grid td { border: 1px solid var(--green); min-width: 44px; height: 52px; padding: 6px; text-align: center; font-size: 22px; overflow-wrap: anywhere; }
 .level1-message { border: 1px solid var(--green-dim); padding: 12px; overflow-wrap: anywhere; }
 .level1-admin-forms { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 28px; }
+
+.level1-section h2 { overflow-wrap: anywhere; }
+.level1-progress-table { border-collapse: collapse; width: 100%; font-size: 13px; }
+.level1-progress-table th, .level1-progress-table td { padding: 12px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--green-dim); }
+.level1-progress-table th { font-size: 11px; white-space: nowrap; }

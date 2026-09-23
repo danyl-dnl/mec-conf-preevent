@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useId } from "react";
+import AdminProgress from "../../features/level1/AdminProgress";
 import AdminPuzzles from "../../features/level1/AdminPuzzles";
 import { supabase } from "../../lib/supabase";
 import {
@@ -205,6 +206,7 @@ function AdminDashboard({ onSignOut }: { onSignOut: () => void }) {
 
       <PairSection />
       <AdminPuzzles />
+      <AdminProgress />
     </div>
   );
 }
