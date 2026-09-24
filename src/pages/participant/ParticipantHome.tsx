@@ -536,11 +536,7 @@ function LoginView({ onSignIn }: { onSignIn: () => void }) {
           display: "flex",
           justifyContent: "center",
           alignItems: "center",
-          marginBottom: "36px",
-          border: "1px solid var(--green-dim)",
-          background: "#000",
-          boxShadow: "0 0 20px rgba(57, 255, 20, 0.12)",
-          overflow: "hidden",
+          margin: "8px 0 32px",
         }}
       >
         <img
@@ -548,9 +544,9 @@ function LoginView({ onSignIn }: { onSignIn: () => void }) {
           alt="Split face fragments awaiting connection"
           style={{
             width: "100%",
+            maxWidth: "360px",
             height: "auto",
             display: "block",
-            objectFit: "contain",
           }}
         />
       </div>
