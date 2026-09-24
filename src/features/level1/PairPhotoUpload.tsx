@@ -64,13 +64,36 @@ export default function PairPhotoUpload({ onComplete, onBusyChange }: { onComple
     }
   }
   return <div>
-    <h3>ONE LAST STEP</h3>
-    <p>Upload one photo with your partner to complete Level 1.</p>
+    <h3 style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: '20px 0 12px' }}>
+      <span>📸</span> COMPLETE THE PHOTO CHALLENGE
+    </h3>
+
+    <div
+      style={{
+        border: '1px solid var(--green-dim)',
+        backgroundColor: 'rgba(57, 255, 20, 0.04)',
+        padding: '16px',
+        margin: '16px 0',
+        fontSize: '13.5px',
+        lineHeight: '1.65',
+      }}
+    >
+      <p style={{ margin: '0 0 12px' }}>
+        After successfully completing the partner verification and word challenge, you and your partner must find the designated MEC Con poster placed somewhere around the college premises. Posters may be located at different locations inside or around the college.
+      </p>
+      <p style={{ margin: '0 0 12px' }}>
+        Once you find the required poster, take a selfie or photograph with it and upload the photograph through the website in the designated section.
+      </p>
+      <p style={{ margin: 0, color: 'var(--green)', fontWeight: 600 }}>
+        Once you have successfully completed the partner ID verification, word challenge, and photo challenge, Level 1 is complete.
+      </p>
+    </div>
+
     <label>Choose Photo<input type="file" accept="image/*" disabled={busy || refreshRequired} onChange={event => {
       setFile(event.target.files?.[0] ?? null); setMessage('');
     }} /></label>
     {file && <p style={{ overflowWrap: 'anywhere' }}>Selected: {file.name}</p>}
-    <p>Maximum 5 MB. Only one photo is needed for your pair.</p>
+    <p style={{ fontSize: '12px', color: 'var(--green-dim)' }}>Maximum 5 MB. Only one photo is needed for your pair.</p>
     <button type="button" disabled={!file || busy || refreshRequired} onClick={() => void upload()}>
       {busy ? 'UPLOADING...' : 'UPLOAD PAIR PHOTO'}
     </button>
