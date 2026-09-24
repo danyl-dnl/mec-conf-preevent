@@ -4,6 +4,10 @@ import { supabase } from "../../lib/supabase";
 import { isPairState, isVerifyResult, type PairState } from "./verificationState";
 import "../../index.css"; // Ensure styles are loaded
 
+// Event closing time: 24 September 2026 at 4:15 PM India Standard Time.
+// Update this single value for a future event.
+const EVENT_END_AT = new Date("2026-09-24T16:15:00+05:30");
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -255,6 +259,7 @@ const s = {
 // ---------------------------------------------------------------------------
 
 export default function ParticipantHome() {
+  const [eventFinished, setEventFinished] = useState(() => new Date() >= EVENT_END_AT);
   const [linkStatus, setLinkStatus] = useState<LinkStatus>("loading");
   const verifyInFlight = useRef(false);
   const [puzzleRefresh, setPuzzleRefresh] = useState(0);
@@ -267,6 +272,12 @@ export default function ParticipantHome() {
   const [attemptsRemaining, setAttemptsRemaining] = useState<number>(2);
   const [isVerifying, setIsVerifying] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+
+  useEffect(() => {
+    const updateEventStatus = () => setEventFinished(new Date() >= EVENT_END_AT);
+    const timer = window.setInterval(updateEventStatus, 1000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   const loadPairState = useCallback(async () => {
     setErrorMessage(null);
@@ -337,6 +348,7 @@ export default function ParticipantHome() {
 
   useEffect(() => {
     async function initialize() {
+      if (eventFinished) return;
       try {
         const { data: { session }, error } = await supabase.auth.getSession();
         if (error || !session) {
@@ -350,7 +362,7 @@ export default function ParticipantHome() {
       }
     }
     void initialize();
-  }, [performLinking]);
+  }, [eventFinished, performLinking]);
 
   async function handleVerify() {
     const code = partnerCodeInput.trim().toUpperCase();
@@ -428,6 +440,7 @@ export default function ParticipantHome() {
           <div style={s.hamburger}>≡</div>
         </div>
 
+        {eventFinished ? <EventFinishedView /> : <>
         {linkStatus === "loading" && <LoadingView />}
 
         {linkStatus === "unauthenticated" && (
@@ -499,6 +512,7 @@ export default function ParticipantHome() {
             onSignOut={handleSignOut}
           />
         )}
+        </>}
       </div>
     </div>
   );
@@ -516,6 +530,26 @@ function LoadingView() {
       <div style={s.statusBar}>
         <div>&gt;&gt; CHECKING_SESSION...</div>
         <div>&gt;&gt; PLEASE_WAIT.</div>
+      </div>
+    </>
+  );
+}
+
+function EventFinishedView() {
+  return (
+    <>
+      <h1 style={s.heading}>EVENT<br />ENDED.</h1>
+      <p style={s.subtext}>
+        Thank you for participating.<br />
+        This participant portal is now closed.
+      </p>
+      <div style={s.successBox}>
+        <div><span style={s.dot} />EVENT COMPLETE</div>
+        <div style={{ marginTop: "8px" }}>The event finished at 4:15 PM.</div>
+      </div>
+      <div style={s.statusBar}>
+        <div>&gt;&gt; EVENT_STATUS: COMPLETE...</div>
+        <div>&gt;&gt; PARTICIPANT_ACCESS: CLOSED.</div>
       </div>
     </>
   );
