@@ -15,14 +15,15 @@ export interface ProgressRow {
   photo_uploaded: boolean;
   completed: boolean;
   completed_at: string | null;
+  photo_url?: string | null;
 }
-const nullableText = ['member_a_code', 'member_a_name', 'member_b_code', 'member_b_name', 'puzzle_code'];
+const nullableText = ['member_a_code', 'member_a_name', 'member_b_code', 'member_b_name', 'puzzle_code', 'photo_url'];
 const booleans = ['a_verified', 'b_verified', 'mutual_verified', 'a_locked', 'b_locked', 'solved', 'photo_uploaded', 'completed'];
 export function isProgress(value: unknown): value is ProgressRow[] {
   return Array.isArray(value) && value.every(row => isRecord(row) &&
     Object.keys(row).every(key => ['pair_code', 'completed_at', ...nullableText, ...booleans].includes(key)) &&
     typeof row.pair_code === 'string' && row.pair_code.length > 0 &&
-    nullableText.every(key => row[key] === null || typeof row[key] === 'string') &&
+    nullableText.every(key => row[key] === undefined || row[key] === null || typeof row[key] === 'string') &&
     booleans.every(key => typeof row[key] === 'boolean') &&
     row.mutual_verified === (row.a_verified && row.b_verified) &&
     row.photo_uploaded === row.completed &&

@@ -3,12 +3,19 @@ import { supabase } from '../../lib/supabase';
 import { isProgress, isResetResult, type ProgressRow } from './progress';
 import './level1.css';
 
+interface SelectedPhoto {
+  url: string;
+  pairCode: string;
+  members: string;
+}
+
 export default function AdminProgress() {
   const [rows, setRows] = useState<ProgressRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
+  const [selectedPhoto, setSelectedPhoto] = useState<SelectedPhoto | null>(null);
   const inFlight = useRef(false);
   const refresh = useCallback(async () => {
     try {
@@ -69,10 +76,148 @@ export default function AdminProgress() {
             {row.b_locked && row.member_b_code && <button type="button" disabled={busy} onClick={() => void reset(row.member_b_code!, row.member_b_name)}>RESET B</button>}
           </td>
           <td>{row.solved ? 'Solved' : '—'}</td>
-          <td>{row.photo_uploaded ? 'Uploaded' : '—'}</td>
+          <td>
+            {row.photo_url ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'flex-start' }}>
+                <span style={{ fontSize: '11px', color: '#39ff14' }}>Uploaded</span>
+                <button
+                  type="button"
+                  onClick={() => setSelectedPhoto({
+                    url: row.photo_url!,
+                    pairCode: row.pair_code,
+                    members: `${row.member_a_name ?? row.member_a_code ?? 'A'} & ${row.member_b_name ?? row.member_b_code ?? 'B'}`
+                  })}
+                  style={{
+                    background: 'rgba(57, 255, 20, 0.1)',
+                    border: '1px solid #39ff14',
+                    color: '#39ff14',
+                    fontFamily: 'inherit',
+                    fontSize: '11px',
+                    padding: '3px 8px',
+                    cursor: 'pointer',
+                    letterSpacing: '0.04em'
+                  }}
+                >
+                  [ VIEW PHOTO ]
+                </button>
+              </div>
+            ) : row.photo_uploaded ? (
+              'Uploaded'
+            ) : (
+              '—'
+            )}
+          </td>
           <td>{row.completed ? 'Complete' : 'In progress'}</td>
         </tr>)}</tbody>
       </table>
     </div> : <p>No pairs assigned.</p>)}
+
+    {/* Photo Modal Dialog */}
+    {selectedPhoto && (
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Photo for ${selectedPhoto.pairCode}`}
+        onClick={() => setSelectedPhoto(null)}
+        style={{
+          position: 'fixed',
+          inset: 0,
+          background: 'rgba(0, 0, 0, 0.88)',
+          zIndex: 99999,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '24px',
+          boxSizing: 'border-box'
+        }}
+      >
+        <div
+          onClick={e => e.stopPropagation()}
+          style={{
+            background: '#050905',
+            border: '1px solid #39ff14',
+            padding: '24px',
+            maxWidth: '680px',
+            width: '100%',
+            boxSizing: 'border-box',
+            boxShadow: '0 0 30px rgba(57, 255, 20, 0.2)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '16px'
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              <div style={{ fontSize: '11px', color: 'rgba(57, 255, 20, 0.6)', letterSpacing: '0.1em' }}>
+                VERIFIED PAIR PHOTO // {selectedPhoto.pairCode}
+              </div>
+              <div style={{ fontSize: '15px', color: '#39ff14', fontWeight: 'bold' }}>
+                {selectedPhoto.members}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setSelectedPhoto(null)}
+              style={{
+                background: 'transparent',
+                border: '1px solid rgba(57, 255, 20, 0.5)',
+                color: '#39ff14',
+                fontFamily: 'inherit',
+                fontSize: '12px',
+                padding: '6px 12px',
+                cursor: 'pointer'
+              }}
+            >
+              [ CLOSE ✕ ]
+            </button>
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'center', background: '#000', border: '1px solid rgba(57, 255, 20, 0.2)', padding: '8px' }}>
+            <img
+              src={selectedPhoto.url}
+              alt={`Pair ${selectedPhoto.pairCode} completion`}
+              style={{
+                maxWidth: '100%',
+                maxHeight: '65vh',
+                objectFit: 'contain',
+                display: 'block'
+              }}
+            />
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+            <a
+              href={selectedPhoto.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                color: '#39ff14',
+                fontSize: '11px',
+                textDecoration: 'underline',
+                letterSpacing: '0.05em'
+              }}
+            >
+              [ OPEN FULL SIZE IMAGE ↗ ]
+            </a>
+            <button
+              type="button"
+              onClick={() => setSelectedPhoto(null)}
+              style={{
+                background: '#39ff14',
+                border: 'none',
+                color: '#050905',
+                fontFamily: 'inherit',
+                fontSize: '12px',
+                fontWeight: 'bold',
+                padding: '8px 16px',
+                cursor: 'pointer'
+              }}
+            >
+              DONE
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
   </section>;
 }

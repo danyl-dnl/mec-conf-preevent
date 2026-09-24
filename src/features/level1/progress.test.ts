@@ -7,9 +7,10 @@ const row = { pair_code: 'PAIR-001', member_a_code: 'A', member_a_name: 'Alice',
 test('progress validates locked, pending and completed states', () => {
   assert.ok(isProgress([row]));
   assert.ok(isProgress([{ ...row, a_locked: false, a_verified: true, mutual_verified: true, solved: true,
-    photo_uploaded: true, completed: true, completed_at: '2026-09-23T12:00:00Z' }]));
+    photo_uploaded: true, completed: true, completed_at: '2026-09-23T12:00:00Z', photo_url: 'https://res.cloudinary.com/test.jpg' }]));
   for (const value of [{ ...row, a_locked: 'true' }, { ...row, completed: true }, { ...row, mutual_verified: true },
-    { ...row, correct_answer: 'secret' }, { ...row, auth_user_id: 'uuid' }, { ...row, photo_public_id: 'private' }]) assert.equal(isProgress([value]), false);
+    { ...row, correct_answer: 'secret' }, { ...row, auth_user_id: 'uuid' }, { ...row, photo_public_id: 'private' },
+    { ...row, photo_url: 123 }]) assert.equal(isProgress([value]), false);
 });
 test('reset response is scoped to the requested participant', () => {
   const reset = { success: true, participant_code: 'A', wrong_attempts: 0, is_locked: false, self_verified: false };
