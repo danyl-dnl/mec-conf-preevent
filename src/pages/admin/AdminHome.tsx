@@ -1392,8 +1392,7 @@ function PairSection({ onPairsChanged, refreshToken }: { onPairsChanged: () => v
 
     setUnpaired(validUnpaired);
     setPairs(validPairs);
-    onPairsChanged();
-  }, [onPairsChanged]);
+  }, []);
 
   useEffect(() => {
     // eslint-disable-next-line react/set-state-in-effect -- Fetch organizer pair state from the server on mount.
@@ -1446,6 +1445,7 @@ function PairSection({ onPairsChanged, refreshToken }: { onPairsChanged: () => v
     setLastCreated(result);
     setSelectedA("");
     setSelectedB("");
+    onPairsChanged();
     fetchPairState();
   }
 
@@ -1477,6 +1477,7 @@ function PairSection({ onPairsChanged, refreshToken }: { onPairsChanged: () => v
     setRandomMessage(result.complete
       ? `${result.created} random pairs created with puzzles assigned.${randomPlan.leftover ? ` ${randomPlan.leftover.name} (${randomPlan.leftover.participant_code}) remains unpaired.` : ''}`
       : `${result.created} pairs confirmed. Stopped because the next pair could not be confirmed. Review the refreshed list and available puzzle count before generating another preview.`);
+    if (result.created > 0) onPairsChanged();
     try { await fetchPairState(); }
     catch { setIsLoading(false); setLoadError('Could not refresh pairs. Refresh before trying again.'); }
     finally { randomInFlight.current = false; setIsCreating(false); }
