@@ -1,5 +1,6 @@
 """Trusted completion, concurrency, privacy, progress and recovery tests."""
 import json
+import subprocess
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 import test_partner_verification as verification
@@ -45,6 +46,46 @@ class CompletionTests(verification.VerificationTests):
 
     def progress(self):
         return self.call("SELECT COALESCE(json_agg(t), '[]') FROM public.admin_level1_progress() t")
+
+    def test_generated_puzzle_private_roundtrip(self):
+        # Generate fresh, disposable content using the actual admin generator.
+        generated = json.loads(subprocess.check_output([
+            'node', '--input-type=module', '-e',
+            "import {generatePuzzle} from './src/features/level1/generator.ts'; console.log(JSON.stringify(generatePuzzle('spider man')))",
+        ], cwd=verification.ROOT, text=True))
+        a = json.dumps(generated['gridA'])
+        b = json.dumps(generated['gridB'])
+        self.call(f"SELECT public.admin_create_puzzle('GENERATED', '{a}', '{b}', 'SPIDERMAN')")
+        self.call(f"SELECT public.admin_assign_puzzle_to_pair('{self.pair}', 'GENERATED')")
+        allowed = {'status', 'name', 'participant_code', 'fragment_slot', 'assigned_grid',
+                   'mutual_verified', 'solved', 'photo_uploaded', 'completed', 'completed_at'}
+        for verified in (False, True):
+            if verified:
+                self.verify()
+            for uid, slot, grid in [(self.a, 'A', generated['gridA']), (self.b, 'B', generated['gridB'])]:
+                state = self.call('SELECT public.get_my_level1_state()', uid)
+                self.assertEqual(set(state), allowed)
+                self.assertEqual(state['fragment_slot'], slot)
+                self.assertEqual(state['assigned_grid'], grid)
+                self.assertNotIn('SPIDERMAN', json.dumps(state))
+                self.assertEqual(state['status'], 'READY_TO_SOLVE' if verified else 'FIND_PARTNER')
+        # Independently combine the persisted fragments returned to their owners.
+        saved_a = self.call('SELECT public.get_my_level1_state()', self.a)['assigned_grid']
+        saved_b = self.call('SELECT public.get_my_level1_state()', self.b)['assigned_grid']
+        survivors = []
+        for row_a, row_b in zip(saved_a, saved_b):
+            for cell_a, cell_b in zip(row_a, row_b):
+                self.assertNotEqual(cell_a == '', cell_b == '')
+                if '█' not in (cell_a, cell_b):
+                    survivors.append(int(cell_a or cell_b))
+        self.assertEqual(sorted(survivors), sorted([19, 16, 9, 4, 5, 18, 13, 1, 14]))
+        self.denied('SELECT correct_answer, grid_a, grid_b FROM public.puzzles')
+        self.assertEqual(self.call("SELECT public.submit_level1_answer(' spiderman ')", self.a)['status'], 'SOLVED')
+        for uid, grid in [(self.a, generated['gridA']), (self.b, generated['gridB'])]:
+            state = self.call('SELECT public.get_my_level1_state()', uid)
+            self.assertEqual(set(state), allowed | {'solved_at'})
+            self.assertEqual(state['assigned_grid'], grid)
+            self.assertNotIn('SPIDERMAN', json.dumps(state))
 
     def test_requires_valid_solved_mutual_pair(self):
         self.assertEqual(self.claim()['status'], 'NOT_ELIGIBLE')

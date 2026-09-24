@@ -30,3 +30,6 @@ dist-ssr
 
 # Supabase CLI local project metadata and caches
 /supabase/.temp/
+
+# Scratch workspace directory
+scratch/

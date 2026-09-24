@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { isAnswerResult, isLevel1State, type Level1State } from './types';
 import PairPhotoUpload from './PairPhotoUpload';
+import PuzzleGrid from './PuzzleGrid';
+import { isPaperFragment } from './paperGrid';
 import './level1.css';
 
 export default function ParticipantPuzzle({ refreshToken, onCompletedChange }: { refreshToken: number; onCompletedChange: (completed: boolean) => void }) {
@@ -65,11 +67,12 @@ export default function ParticipantPuzzle({ refreshToken, onCompletedChange }: {
     {loading && <p role="status">Loading puzzle status...</p>}
     {state?.assigned_grid && <>
       <h3>FRAGMENT {state.fragment_slot}</h3>
-      <div className="level1-grid-scroll" tabIndex={0} role="region" aria-label="Your assigned grid, scroll horizontally if needed">
-        <table className="level1-grid" style={{ minWidth: state.assigned_grid[0].length * 52 }} aria-label={`Fragment ${state.fragment_slot}`}>
-          <tbody>{state.assigned_grid.map((row, r) => <tr key={r}>{row.map((cell, c) => <td key={c}>{cell || '\u00a0'}</td>)}</tr>)}</tbody>
-        </table>
-      </div>
+      <PuzzleGrid grid={state.assigned_grid} label={`Fragment ${state.fragment_slot}`} />
+      {isPaperFragment(state.assigned_grid) && <p>
+        Compare each cell with the same cell on your partner’s grid. If either cell is shaded, ignore that position.
+        If neither cell is shaded and a number appears, keep the number.
+        Convert the surviving numbers using A=1, B=2, … Y=25 and find the hidden keyword.
+      </p>}
     </>}
     {!loading && !failed && <>
       {state?.status === 'NOT_PAIRED' && <p>Pair assignment pending.</p>}
@@ -77,10 +80,10 @@ export default function ParticipantPuzzle({ refreshToken, onCompletedChange }: {
       {state?.status === 'FIND_PARTNER' && <p>Find the participant holding the complementary fragment.</p>}
       {state?.status === 'READY_TO_SOLVE' && <>
         <h3>CONNECTION ESTABLISHED</h3>
-        <p>Combine your fragments and enter the final answer.</p>
+        <p>Combine your fragments to discover the hidden keyword.</p>
         <form onSubmit={event => { event.preventDefault(); void submit(); }}>
           <label>Final answer<input value={answer} onChange={event => setAnswer(event.target.value)} maxLength={1024} disabled={busy} autoComplete="off" /></label>
-          <button disabled={busy || !answer.trim()}>{busy ? 'VERIFYING...' : 'VERIFY GRID'}</button>
+          <button disabled={busy || !answer.trim()}>{busy ? 'VERIFYING...' : 'VERIFY ANSWER'}</button>
         </form>
       </>}
       {state?.status === 'SOLVED' && <div>

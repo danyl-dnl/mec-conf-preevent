@@ -1,4 +1,8 @@
-import { useState, useEffect, useRef, useId } from "react";
+import { useState, useEffect, useRef, useId, useCallback } from "react";
+import { randomPairPlan, saveRandomPairs } from "./randomPairs";
+import DeleteParticipantsDialog from "./DeleteParticipantsDialog";
+import { selectedRosterRows, toggleRosterSelection } from "./rosterSelection";
+import ManualParticipantForm from "./ManualParticipantForm";
 import AdminProgress from "../../features/level1/AdminProgress";
 import AdminPuzzles from "../../features/level1/AdminPuzzles";
 import { supabase } from "../../lib/supabase";
@@ -137,6 +141,9 @@ export default function AdminHome() {
 
 
 function AdminDashboard({ onSignOut }: { onSignOut: () => void }) {
+  const [rosterRefreshToken, setRosterRefreshToken] = useState(0);
+  const [pairRefreshToken, setPairRefreshToken] = useState(0);
+  const onPairsChanged = useCallback(() => setPairRefreshToken(value => value + 1), []);
   const [roster, setRoster] = useState<AdminParticipantRow[] | null>(null);
   const [isRosterLoading, setIsRosterLoading] = useState(false);
   const [rosterError, setRosterError] = useState<string | null>(null);
@@ -179,6 +186,7 @@ function AdminDashboard({ onSignOut }: { onSignOut: () => void }) {
     }
 
     setRoster(validRoster);
+    setRosterRefreshToken(value => value + 1);
   }
 
   return (
@@ -204,8 +212,8 @@ function AdminDashboard({ onSignOut }: { onSignOut: () => void }) {
 
       <AdminRosterList roster={roster} isLoading={isRosterLoading} error={rosterError} onRefresh={fetchRoster} />
 
-      <PairSection />
-      <AdminPuzzles />
+      <PairSection onPairsChanged={onPairsChanged} refreshToken={rosterRefreshToken} />
+      <AdminPuzzles refreshToken={pairRefreshToken} />
       <AdminProgress />
     </div>
   );
@@ -215,6 +223,18 @@ function AdminDashboard({ onSignOut }: { onSignOut: () => void }) {
 // ---------------------------------------------------------------------------
 
 function RosterSection({ onImportSuccess }: { onImportSuccess: () => void }) {
+  const [manualSource, setManualSource] = useState(false);
+  const [manualVersion, setManualVersion] = useState(0);
+  const previewInFlight = useRef(false);
+  function invalidateManualPreview() {
+    if (!manualSource) return;
+    setPreview({ status: "idle" });
+    setPreviewPayload([]);
+    setIsSuspiciousAcknowledged(false);
+    setImportResult(null);
+    setImportError(null);
+    setShowConfirmModal(false);
+  }
   // ── File / CSV state ────────────────────────────────────────────────────
   const [csv, setCsv]             = useState<ParsedCsv | null>(null);
   const [csvError, setCsvError]   = useState<string | null>(null);
@@ -260,6 +280,7 @@ function RosterSection({ onImportSuccess }: { onImportSuccess: () => void }) {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    setManualSource(false);
     // Clear previous results immediately when a new file is chosen
     setCsv(null);
     setCsvError(null);
@@ -296,24 +317,36 @@ function RosterSection({ onImportSuccess }: { onImportSuccess: () => void }) {
   }
 
   // ── Preview RPC ──────────────────────────────────────────────────────────
-  async function handleRequestPreview() {
-    if (!csv || !isMappingComplete(mapping)) return;
-    if (getMappingConflicts(mapping).length > 0) return;
-
-    const payload = buildPayload(csv, mapping);
+  async function handleRequestPreview(manualPayload?: RosterPayloadRow[]) {
+    if (previewInFlight.current || isImporting || isParsing) return;
+    if (!manualPayload && (!csv || !isMappingComplete(mapping) || getMappingConflicts(mapping).length > 0)) return;
+    const payload = manualPayload ?? buildPayload(csv!, mapping);
+    setManualSource(!!manualPayload);
+    setIsSuspiciousAcknowledged(false);
+    setImportResult(null);
+    setImportError(null);
+    setShowConfirmModal(false);
 
     if (payload.length === 0) {
       setPreview({ status: "error", message: "No data rows found after filtering blank rows." });
       return;
     }
 
+    previewInFlight.current = true;
     setIsPreviewing(true);
     setPreview({ status: "loading" });
     setPreviewPayload(payload);
 
-    const { data, error } = await supabase.rpc("admin_preview_roster", { payload });
-
-    setIsPreviewing(false);
+    let response;
+    try { response = await supabase.rpc("admin_preview_roster", { payload }); }
+    catch {
+      setPreview({ status: "error", message: "Preview request failed. Check your connection and try again." });
+      return;
+    } finally {
+      previewInFlight.current = false;
+      setIsPreviewing(false);
+    }
+    const { data, error } = response;
 
     if (error) {
       console.error("admin_preview_roster:", error.message);
@@ -398,6 +431,7 @@ function RosterSection({ onImportSuccess }: { onImportSuccess: () => void }) {
     setIsSuspiciousAcknowledged(false);
     if (fileInputRef.current) fileInputRef.current.value = "";
 
+    if (manualSource) setManualVersion(value => value + 1);
     onImportSuccess();
   }
 
@@ -412,6 +446,14 @@ function RosterSection({ onImportSuccess }: { onImportSuccess: () => void }) {
         &gt;&gt; SECTION: ROSTER_MANAGEMENT
       </h2>
 
+      <SectionBlock label="ADD PARTICIPANT MANUALLY">
+        <ManualParticipantForm key={manualVersion} disabled={isImporting || isPreviewing || isParsing || showConfirmModal}
+          onEdit={invalidateManualPreview} onPreview={payload => {
+            resetToFile();
+            void handleRequestPreview(payload);
+          }} />
+      </SectionBlock>
+
       {/* ── Step 1: File upload ── */}
       <SectionBlock label="01  UPLOAD REGISTRATION CSV">
         <div style={{ display: "flex", alignItems: "center", gap: "16px", flexWrap: "wrap" }}>
@@ -425,7 +467,7 @@ function RosterSection({ onImportSuccess }: { onImportSuccess: () => void }) {
               type="file"
               accept=".csv,text/csv"
               onChange={handleFileChange}
-              disabled={isParsing}
+              disabled={isParsing || isPreviewing || isImporting || showConfirmModal}
               style={{
                 fontFamily: MONO, fontSize: "13px", color: GREEN,
                 background: GREEN_GLOW, border: `1px solid ${GREY}`,
@@ -435,7 +477,7 @@ function RosterSection({ onImportSuccess }: { onImportSuccess: () => void }) {
             />
           </label>
           {(csv || csvError) && (
-            <button type="button" onClick={resetToFile} style={{ ...secondaryBtnStyle, width: "auto", padding: "10px 18px" }}>
+            <button type="button" onClick={resetToFile} disabled={isPreviewing || isImporting} style={{ ...secondaryBtnStyle, width: "auto", padding: "10px 18px" }}>
               [ CLEAR / RESET ]
             </button>
           )}
@@ -490,8 +532,8 @@ function RosterSection({ onImportSuccess }: { onImportSuccess: () => void }) {
           <button
             id="btn-request-preview"
             type="button"
-            onClick={handleRequestPreview}
-            disabled={isPreviewing || preview.status === "loading"}
+            onClick={() => { void handleRequestPreview(); }}
+            disabled={isPreviewing || isImporting || preview.status === "loading"}
             style={{ ...primaryBtnStyle, width: "auto", padding: "14px 28px" }}
           >
             {isPreviewing ? "[ REQUESTING PREVIEW... ]" : "[ REQUEST SERVER PREVIEW ]"}
@@ -587,7 +629,7 @@ function RosterSection({ onImportSuccess }: { onImportSuccess: () => void }) {
                         margin: 0,
                       }}
                     >
-                      [ CONFIRM IMPORT ]
+                      {manualSource ? "[ CONFIRM PARTICIPANT ]" : "[ CONFIRM IMPORT ]"}
                     </button>
                     {!isEligible && counts.problems > 0 && (
                       <span style={{ fontSize: "12px", color: RED }}>
@@ -602,7 +644,7 @@ function RosterSection({ onImportSuccess }: { onImportSuccess: () => void }) {
                   </div>
                 ) : (
                   <div style={{ padding: "20px", border: `1px solid ${GREEN}`, background: BG, marginTop: "20px" }}>
-                    <div style={{ fontSize: "14px", fontWeight: "bold", marginBottom: "16px", color: GREEN }}>Import roster?</div>
+                    <div style={{ fontSize: "14px", fontWeight: "bold", marginBottom: "16px", color: GREEN }}>{manualSource ? "Save participant?" : "Import roster?"}</div>
                     <div style={{ fontSize: "13px", color: GREEN_DIM, marginBottom: "24px", lineHeight: "1.6" }}>
                       {counts.new_} new participants<br />
                       {counts.updates} details updates<br />
@@ -614,7 +656,7 @@ function RosterSection({ onImportSuccess }: { onImportSuccess: () => void }) {
                     <div style={{ display: "flex", gap: "16px" }}>
                       <button type="button" onClick={() => setShowConfirmModal(false)} disabled={isImporting} style={{ ...secondaryBtnStyle, width: "auto" }}>[ CANCEL ]</button>
                       <button type="button" onClick={handleConfirmImport} disabled={isImporting} style={{ ...primaryBtnStyle, width: "auto", margin: 0 }}>
-                        {isImporting ? "[ IMPORTING ROSTER... ]" : "[ IMPORT ROSTER ]"}
+                        {isImporting ? "[ SAVING... ]" : manualSource ? "[ SAVE PARTICIPANT ]" : "[ IMPORT ROSTER ]"}
                       </button>
                     </div>
                   </div>
@@ -1023,6 +1065,36 @@ function AdminRosterList({
   error: string | null;
   onRefresh: () => void;
 }) {
+  const [selected, setSelected] = useState<string[]>([]);
+  const [pendingDelete, setPendingDelete] = useState<AdminParticipantRow[] | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteMessage, setDeleteMessage] = useState('');
+  const deletingRef = useRef(false);
+  async function confirmDelete() {
+    if (!pendingDelete || deletingRef.current) return;
+    deletingRef.current = true; setDeleting(true); setDeleteMessage('');
+    try {
+      const codes = pendingDelete.map(row => row.participant_code);
+      const { data, error } = await supabase.rpc('admin_delete_participants', { participant_codes: codes });
+      if (error) {
+        if (error.message.toLowerCase().includes('paired participants')) {
+          setDeleteMessage('Paired participants cannot be deleted. Nothing was deleted; choose only unpaired participants.');
+        } else {
+          setDeleteMessage('Deletion could not be confirmed. Review the refreshed roster before retrying.');
+        }
+      } else if (!data || data.deleted !== codes.length || Object.keys(data).length !== 1) {
+        setDeleteMessage('Unexpected deletion response. Review the refreshed roster before retrying.');
+      } else {
+        setDeleteMessage(`${data.deleted} participant${data.deleted === 1 ? '' : 's'} deleted.`);
+      }
+    } catch {
+      setDeleteMessage('Deletion could not be confirmed. Review the refreshed roster before retrying.');
+    } finally {
+      setPendingDelete(null); setSelected([]);
+      setDeleting(false); deletingRef.current = false;
+      onRefresh();
+    }
+  }
   const [searchQuery, setSearchQuery] = useState("");
   const [branchFilter, setBranchFilter] = useState("ALL");
 
@@ -1058,6 +1130,8 @@ function AdminRosterList({
     return true;
   });
 
+  const selectedRows = selectedRosterRows(filtered, selected);
+
   return (
     <section aria-labelledby="roster-list-heading">
       <SectionBlock label="ROSTER LIST">
@@ -1065,7 +1139,7 @@ function AdminRosterList({
           <div style={{ fontSize: "13px", color: GREEN_DIM }}>
             Total Participants: <span style={{ color: GREEN, fontWeight: "bold" }}>{roster.length}</span>
           </div>
-          <button type="button" onClick={onRefresh} disabled={isLoading} style={{ ...secondaryBtnStyle, width: "auto", padding: "8px 16px", fontSize: "11px" }}>
+          <button type="button" onClick={onRefresh} disabled={isLoading || deleting || !!pendingDelete} style={{ ...secondaryBtnStyle, width: "auto", padding: "8px 16px", fontSize: "11px" }}>
             {isLoading ? "[ REFRESHING... ]" : "[ REFRESH ]"}
           </button>
         </div>
@@ -1078,7 +1152,8 @@ function AdminRosterList({
               type="text"
               placeholder="Name, Email, or ID"
               value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
+              disabled={deleting || !!pendingDelete}
+              onChange={e => { setSearchQuery(e.target.value); setSelected([]); }}
               style={{
                 fontFamily: MONO, fontSize: "13px", color: GREEN,
                 background: BG, border: `1px solid ${GREEN_DIM}`,
@@ -1090,7 +1165,8 @@ function AdminRosterList({
             <span style={{ fontSize: "11px", color: GREEN_DIM }}>BRANCH</span>
             <select
               value={branchFilter}
-              onChange={e => setBranchFilter(e.target.value)}
+              disabled={deleting || !!pendingDelete}
+              onChange={e => { setBranchFilter(e.target.value); setSelected([]); }}
               style={{
                 fontFamily: MONO, fontSize: "13px", color: GREEN,
                 background: BG, border: `1px solid ${GREEN_DIM}`,
@@ -1105,12 +1181,25 @@ function AdminRosterList({
           </label>
         </div>
 
+        {deleteMessage && <p role="status" style={{ lineHeight: 1.7 }}>{deleteMessage}</p>}
+        {selectedRows.length > 0 && <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 20 }}>
+          <span>{selectedRows.length} selected</span>
+          <button type="button" disabled={deleting || isLoading || !!pendingDelete} style={{ ...secondaryBtnStyle, width: 'auto' }}
+            onClick={() => setSelected(filtered.map(row => row.participant_code))}>[ SELECT ALL SHOWN ({filtered.length}) ]</button>
+          <button type="button" disabled={deleting || !!pendingDelete} style={{ ...secondaryBtnStyle, width: 'auto' }}
+            onClick={() => setSelected([])}>[ CLEAR SELECTION ]</button>
+          <button type="button" disabled={deleting || isLoading || !!pendingDelete} style={{ ...secondaryBtnStyle, color: RED, borderColor: RED, width: 'auto' }}
+            onClick={() => setPendingDelete(selectedRows)}>[ DELETE SELECTED ]</button>
+        </div>}
+        {pendingDelete && <DeleteParticipantsDialog participants={pendingDelete} busy={deleting}
+          onCancel={() => setPendingDelete(null)} onConfirm={() => { void confirmDelete(); }} />}
+
         {/* Table */}
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px", letterSpacing: "0.02em" }}>
             <thead>
               <tr style={{ borderBottom: `1px solid ${GREEN_FAINT}` }}>
-                {["Participant ID", "Name", "Branch", "Email", "Account"].map(col => (
+                {["Select", "Participant ID", "Name", "Branch", "Email", "Account", "Actions"].map(col => (
                   <th key={col} style={{ textAlign: "left", padding: "8px 12px", color: GREEN_DIM, fontWeight: "normal", fontSize: "11px" }}>
                     {col.toUpperCase()}
                   </th>
@@ -1120,16 +1209,22 @@ function AdminRosterList({
             <tbody>
               {filtered.map(r => (
                 <tr key={r.participant_code} style={{ borderBottom: `1px solid ${GREEN_FAINT}` }}>
+                  <td style={{ padding: "10px 12px" }}><input type="checkbox" aria-label={`Select ${r.name} (${r.participant_code})`}
+                    checked={selected.includes(r.participant_code)} disabled={deleting || isLoading || !!pendingDelete}
+                    onChange={() => setSelected(previous => toggleRosterSelection(previous, r.participant_code))} /></td>
                   <td style={{ padding: "10px 12px", color: GREEN }}>{r.participant_code}</td>
                   <td style={{ padding: "10px 12px", color: GREEN }}>{r.name}</td>
                   <td style={{ padding: "10px 12px", color: GREEN }}>{r.branch || "—"}</td>
                   <td style={{ padding: "10px 12px", color: GREEN }}>{r.registered_email}</td>
                   <td style={{ padding: "10px 12px", color: GREEN_DIM }}>{r.is_linked ? "Linked" : "Not linked"}</td>
+                  <td style={{ padding: "10px 12px" }}><button type="button" aria-label={`Delete ${r.name} (${r.participant_code})`}
+                    disabled={deleting || isLoading || !!pendingDelete} onClick={() => setPendingDelete([r])}
+                    style={{ ...secondaryBtnStyle, width: 'auto', padding: '8px 12px', color: RED, borderColor: RED }}>[ DELETE ]</button></td>
                 </tr>
               ))}
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={5} style={{ padding: "20px", textAlign: "center", color: GREEN_DIM }}>
+                  <td colSpan={7} style={{ padding: "20px", textAlign: "center", color: GREEN_DIM }}>
                     No participants found matching filters.
                   </td>
                 </tr>
@@ -1213,7 +1308,11 @@ function participantLabel(p: UnpairedParticipant): string {
   return `${p.participant_code} — ${p.name} — ${p.branch ?? "—"}`;
 }
 
-function PairSection() {
+function PairSection({ onPairsChanged, refreshToken }: { onPairsChanged: () => void; refreshToken: number }) {
+  const [randomPlan, setRandomPlan] = useState<ReturnType<typeof randomPairPlan<UnpairedParticipant>> | null>(null);
+  const [randomMessage, setRandomMessage] = useState('');
+  const randomInFlight = useRef(false);
+
   const [unpaired, setUnpaired] = useState<UnpairedParticipant[] | null>(null);
   const [pairs, setPairs] = useState<AdminPairRow[] | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -1227,9 +1326,8 @@ function PairSection() {
   const [createError, setCreateError] = useState<string | null>(null);
   const [lastCreated, setLastCreated] = useState<CreatePairResult | null>(null);
 
-  useEffect(() => { fetchPairState(); }, []);
-
-  async function fetchPairState() {
+  const fetchPairState = useCallback(async () => {
+    setRandomPlan(null);
     setIsLoading(true);
     setLoadError(null);
 
@@ -1264,14 +1362,20 @@ function PairSection() {
 
     setUnpaired(validUnpaired);
     setPairs(validPairs);
-  }
+    onPairsChanged();
+  }, [onPairsChanged]);
+
+  useEffect(() => {
+    // eslint-disable-next-line react/set-state-in-effect -- Fetch organizer pair state from the server on mount.
+    void fetchPairState();
+  }, [fetchPairState, refreshToken]);
 
   async function handleCreatePair() {
     if (!selectedA || !selectedB || selectedA === selectedB || isCreating) return;
     setIsCreating(true);
     setCreateError(null);
 
-    const { data, error } = await supabase.rpc("admin_create_pair", {
+    const { data, error } = await supabase.rpc("admin_create_pair_with_puzzle", {
       participant_code_a: selectedA,
       participant_code_b: selectedB,
     });
@@ -1282,7 +1386,9 @@ function PairSection() {
     if (error) {
       console.error(error);
       const msg = error.message?.toLowerCase() ?? "";
-      if (msg.includes("already paired")) {
+      if (msg.includes("unused puzzle")) {
+        setCreateError("No unused puzzles remain. Add puzzles in Level 1 before creating more pairs.");
+      } else if (msg.includes("already paired")) {
         setCreateError("One or both participants are already paired. The roster may have changed — please choose again.");
       } else if (msg.includes("unknown participant")) {
         setCreateError("One of the participant codes is no longer valid. Refresh and choose again.");
@@ -1313,7 +1419,40 @@ function PairSection() {
     fetchPairState();
   }
 
-  const canCreate = selectedA !== "" && selectedB !== "" && selectedA !== selectedB && !isCreating;
+  function previewRandomPairs() {
+    if (!unpaired || unpaired.length < 2 || isLoading || isCreating || loadError) return;
+    setShowConfirm(false);
+    setLastCreated(null);
+    setCreateError(null);
+    setRandomMessage('');
+    setSelectedA(''); setSelectedB('');
+    try { setRandomPlan(randomPairPlan(unpaired)); }
+    catch { setCreateError('Could not generate pairs. Refresh the participant list.'); }
+  }
+
+  async function confirmRandomPairs() {
+    if (!randomPlan || randomInFlight.current || isCreating || isLoading || loadError) return;
+    randomInFlight.current = true;
+    setIsCreating(true);
+    setRandomMessage('Creating random pairs…');
+    const result = await saveRandomPairs(randomPlan.pairs, async (a, b) => {
+      const { data, error } = await supabase.rpc('admin_create_pair_with_puzzle', {
+        participant_code_a: a.participant_code, participant_code_b: b.participant_code,
+      });
+      const confirmed = error ? null : validateCreatePairResult(data);
+      if (!confirmed || confirmed.member_a.participant_code !== a.participant_code ||
+          confirmed.member_b.participant_code !== b.participant_code) throw new Error('Pair not confirmed');
+    });
+    setRandomPlan(null);
+    setRandomMessage(result.complete
+      ? `${result.created} random pairs created with puzzles assigned.${randomPlan.leftover ? ` ${randomPlan.leftover.name} (${randomPlan.leftover.participant_code}) remains unpaired.` : ''}`
+      : `${result.created} pairs confirmed. Stopped because the next pair could not be confirmed. Review the refreshed list and available puzzle count before generating another preview.`);
+    try { await fetchPairState(); }
+    catch { setIsLoading(false); setLoadError('Could not refresh pairs. Refresh before trying again.'); }
+    finally { randomInFlight.current = false; setIsCreating(false); }
+  }
+
+  const canCreate = selectedA !== "" && selectedB !== "" && selectedA !== selectedB && !isCreating && !isLoading && !loadError && !randomPlan;
 
   const participantA = unpaired?.find(p => p.participant_code === selectedA) ?? null;
   const participantB = unpaired?.find(p => p.participant_code === selectedB) ?? null;
@@ -1343,7 +1482,7 @@ function PairSection() {
           <button
             type="button"
             onClick={fetchPairState}
-            disabled={isLoading}
+            disabled={isLoading || isCreating}
             style={{ ...secondaryBtnStyle, width: "auto", padding: "6px 14px", fontSize: "11px", margin: 0 }}
           >
             {isLoading ? "[ REFRESHING... ]" : "[ REFRESH ]"}
@@ -1357,7 +1496,7 @@ function PairSection() {
           <div style={{ padding: "16px", border: `1px solid ${GREEN}`, marginBottom: "24px",
                         background: GREEN_GLOW, fontSize: "13px", lineHeight: "1.8" }}>
             <div style={{ color: GREEN, fontWeight: "bold", marginBottom: "8px" }}>
-              {lastCreated.pair_code} CREATED
+              {lastCreated.pair_code} CREATED — PUZZLE ASSIGNED
             </div>
             <div style={{ color: GREEN_DIM }}>
               Fragment A — {lastCreated.member_a.participant_code} — {lastCreated.member_a.name} — {lastCreated.member_a.branch ?? "—"}
@@ -1367,6 +1506,31 @@ function PairSection() {
             </div>
           </div>
         )}
+
+        <button type="button" onClick={previewRandomPairs}
+          disabled={isCreating || isLoading || !!loadError || !unpaired || unpaired.length < 2}
+          style={{ ...secondaryBtnStyle, width: "auto", marginBottom: 16 }}>
+          [ RANDOMLY PAIR ]
+        </button>
+        <p style={{ fontSize: 13, color: GREEN_DIM }}>Randomly pair all currently unpaired participants and assign each an unused puzzle. Existing pairs stay unchanged.</p>
+        {randomMessage && <p role="status" style={{ lineHeight: 1.7 }}>{randomMessage}</p>}
+        {randomPlan && <div style={{ border: `1px solid ${GREEN_DIM}`, padding: 16, marginBottom: 24 }}>
+          <h3 style={{ fontSize: 14 }}>REVIEW {randomPlan.pairs.length} RANDOM PAIRS</h3>
+          <ol style={{ paddingLeft: 24, lineHeight: 1.8, overflowWrap: 'anywhere' }}>
+            {randomPlan.pairs.map(([a, b]) => <li key={a.participant_code}>
+              A: {a.name} ({a.participant_code}) ↔ B: {b.name} ({b.participant_code})
+            </li>)}
+          </ol>
+          {randomPlan.leftover && <p>Remains unpaired: {randomPlan.leftover.name} ({randomPlan.leftover.participant_code}).</p>}
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+            <button type="button" disabled={isCreating} onClick={() => setRandomPlan(null)}
+              style={{ ...secondaryBtnStyle, width: 'auto' }}>[ CANCEL ]</button>
+            <button type="button" disabled={isCreating} onClick={() => { void confirmRandomPairs(); }}
+              style={{ ...primaryBtnStyle, width: 'auto', margin: 0 }}>
+              {isCreating ? '[ CREATING PAIRS… ]' : '[ CONFIRM RANDOM PAIRS ]'}
+            </button>
+          </div>
+        </div>}
 
         {/* Participant selectors */}
         {unpaired !== null && (
@@ -1380,7 +1544,7 @@ function PairSection() {
                 id="pair-select-a"
                 value={selectedA}
                 onChange={e => { setSelectedA(e.target.value); setShowConfirm(false); setLastCreated(null); setCreateError(null); }}
-                disabled={isCreating}
+                disabled={isCreating || !!randomPlan}
                 style={{
                   fontFamily: MONO, fontSize: "13px", color: GREEN,
                   background: BG, border: `1px solid ${GREY}`,
@@ -1407,7 +1571,7 @@ function PairSection() {
                 id="pair-select-b"
                 value={selectedB}
                 onChange={e => { setSelectedB(e.target.value); setShowConfirm(false); setLastCreated(null); setCreateError(null); }}
-                disabled={isCreating}
+                disabled={isCreating || !!randomPlan}
                 style={{
                   fontFamily: MONO, fontSize: "13px", color: GREEN,
                   background: BG, border: `1px solid ${GREY}`,

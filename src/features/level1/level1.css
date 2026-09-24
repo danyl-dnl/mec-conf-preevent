@@ -11,8 +11,15 @@
 .level1-section button:disabled { opacity: .5; cursor: not-allowed; }
 .level1-section :focus-visible { outline: 2px solid var(--green); outline-offset: 3px; }
 .level1-grid-scroll { overflow-x: auto; margin: 20px 0; }
-.level1-grid { border-collapse: collapse; width: 100%; table-layout: fixed; }
-.level1-grid td { border: 1px solid var(--green); min-width: 44px; height: 52px; padding: 6px; text-align: center; font-size: 22px; overflow-wrap: anywhere; }
+.level1-grid { width: 100%; max-width: 400px; margin: 20px 0; border-top: 1px solid var(--green); border-left: 1px solid var(--green); box-sizing: border-box; }
+.level1-grid-row { display: grid; }
+.level1-grid-cell { aspect-ratio: 1; min-width: 0; box-sizing: border-box; border-right: 1px solid var(--green); border-bottom: 1px solid var(--green); display: flex; align-items: center; justify-content: center; padding: 3px; text-align: center; font-size: clamp(16px, 4vw, 24px); overflow-wrap: anywhere; }
+.level1-grid-cell span { max-width: 100%; max-height: 100%; overflow: auto; white-space: pre-wrap; }
+.level1-grid-text { font-size: clamp(10px, 2.6vw, 13px); line-height: 1.15; }
+.level1-grid-shaded { background-color: var(--green-dim); background-image: repeating-linear-gradient(135deg, transparent 0 4px, var(--green) 4px 6px); }
+.level1-grid-empty, .level1-grid-number { background: var(--bg); }
+.level1-admin-forms > form { min-width: 0; }
+.level1-generator-preview { overflow-wrap: anywhere; }
 .level1-message { border: 1px solid var(--green-dim); padding: 12px; overflow-wrap: anywhere; }
 .level1-admin-forms { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 28px; }
 

@@ -619,7 +619,7 @@ function VerificationView({
       <input
         id="input-partner-code"
         type="text"
-        placeholder="MCF-"
+        placeholder="MEC-XXX"
         value={partnerCodeInput}
         onChange={(e) => onPartnerCodeChange(e.target.value)}
         style={s.input}

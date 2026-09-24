@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "node --test src/features/level1/*.test.ts src/pages/participant/*.test.ts src/pages/admin/*.test.ts supabase/functions/upload-pair-photo/handler.test.ts && node --import ./tests/tsx-loader.mjs --test tests/generator-preview.test.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.117.0",
