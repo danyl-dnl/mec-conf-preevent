@@ -530,8 +530,17 @@ function LoginView({ onSignIn }: { onSignIn: () => void }) {
         Find your partner. Solve together.
       </p>
 
-      <div style={{ height: "120px", display: "flex", justifyContent: "center", alignItems: "center", marginBottom: "40px", border: "1px dashed var(--green-dim)" }}>
-         [ Face Graphic Placeholder ]
+      <div style={{ display: "flex", justifyContent: "center", marginBottom: "40px" }}>
+        <img
+          src="/mec-conf-hero.png"
+          alt="MEC.CONF"
+          style={{
+            width: "220px",
+            height: "auto",
+            display: "block",
+            objectFit: "contain",
+          }}
+        />
       </div>
 
       <button id="btn-google-signin" type="button" style={s.primaryBtn} onClick={onSignIn}>
