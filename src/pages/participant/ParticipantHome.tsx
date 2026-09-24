@@ -4,9 +4,9 @@ import { supabase } from "../../lib/supabase";
 import { isPairState, isVerifyResult, type PairState } from "./verificationState";
 import "../../index.css"; // Ensure styles are loaded
 
-// Event closing time: 24 September 2026 at 4:15 PM India Standard Time.
+// Event closing time: 24 September 2026 at 4:30 PM India Standard Time.
 // Update this single value for a future event.
-const EVENT_END_AT = new Date("2026-09-24T16:15:00+05:30");
+const EVENT_END_AT = new Date("2026-09-24T16:30:00+05:30");
 
 // ---------------------------------------------------------------------------
 // Types
@@ -545,7 +545,7 @@ function EventFinishedView() {
       </p>
       <div style={s.successBox}>
         <div><span style={s.dot} />EVENT COMPLETE</div>
-        <div style={{ marginTop: "8px" }}>The event finished at 4:15 PM.</div>
+        <div style={{ marginTop: "8px" }}>The event finished at 4:30 PM.</div>
       </div>
       <div style={s.statusBar}>
         <div>&gt;&gt; EVENT_STATUS: COMPLETE...</div>
