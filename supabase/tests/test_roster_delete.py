@@ -9,6 +9,7 @@ class RosterDeleteTests(verification.VerificationTests):
     def setUpClass(cls):
         super().setUpClass()
         cls.sql((verification.ROOT / 'supabase/migrations/20260924020000_admin_delete_participants.sql').read_text())
+        cls.sql((verification.ROOT / 'supabase/migrations/20260924030000_allow_delete_paired_participants.sql').read_text())
 
     def setUp(self):
         super().setUp()
@@ -28,13 +29,16 @@ class RosterDeleteTests(verification.VerificationTests):
         self.assertEqual(self.q_one('SELECT count(*) FROM public.participants'),'0')
         self.assertEqual(self.q_one(f"SELECT count(*) FROM auth.users WHERE id IN ('{a}','{b}','{c}')"),'3')
 
-    def test_mixed_paired_selection_is_atomic(self):
+    def test_paired_participant_deletion_dissolves_pair_and_unpairs_partner(self):
         for code in ['A','B','C']: self.create_participant(code)
         self.create_pair(self.admin,'A','B')
-        self.denied("ARRAY['A','C']")
-        self.assertEqual(self.q_one('SELECT count(*) FROM public.participants'),'3')
-        self.assertEqual(self.q_one('SELECT count(*) FROM public.pair_members'),'2')
-        self.assertEqual(self.delete(['C']),{'deleted':1})
+        self.assertEqual(self.delete(['A','C']),{'deleted':2})
+        # Participant B remains unpaired in the roster
+        self.assertEqual(self.q_one('SELECT count(*) FROM public.participants'),'1')
+        self.assertEqual(self.q_one("SELECT participant_code FROM public.participants"),'B')
+        # Pair and pair_members were cleanly dissolved
+        self.assertEqual(self.q_one('SELECT count(*) FROM public.pairs'),'0')
+        self.assertEqual(self.q_one('SELECT count(*) FROM public.pair_members'),'0')
 
     def test_missing_or_malformed_selection_never_partially_deletes(self):
         self.create_participant('A')

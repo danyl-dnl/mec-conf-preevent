@@ -79,6 +79,26 @@ test('deletion confirmation identifies selected participants and never confirms 
   assert.match(html,/example@example.com/);
   assert.match(html,/CANCEL/);
   assert.match(html,/DELETE PARTICIPANT/);
-  assert.match(html,/Paired participants are protected/);
+  assert.match(html,/dissolve their pair/);
   assert.equal(confirmed,false);
+
+  // When participant is paired, dialog shows the pair warning
+  const pairedMap = new Map([['TEST-1','PAIR-001']]);
+  const htmlPaired = renderToStaticMarkup(createElement(Dialog, {participants,pairedMap,busy:false,onCancel(){},onConfirm(){}}));
+  assert.match(htmlPaired,/already paired in PAIR-001/);
+  assert.match(htmlPaired,/PAIRED: PAIR-001/);
+});
+
+test('admin management renders access control form and administrators table', async () => {
+  const { default: AdminManagement } = await import('../src/pages/admin/AdminManagement.tsx');
+  const html = renderToStaticMarkup(createElement(AdminManagement));
+  assert.match(html, /ADMINISTRATOR_ACCESS_CONTROL/);
+  assert.match(html, /ADD NEW ADMINISTRATOR/);
+  assert.match(html, /input-new-admin-email/);
+  assert.match(html, /btn-add-admin/);
+  assert.match(html, /\+ ADD ADMIN/);
+  assert.match(html, /AUTHORIZED ADMINISTRATORS/);
+  assert.match(html, /EMAIL/);
+  assert.match(html, /STATUS/);
+  assert.match(html, /ACTIONS/);
 });

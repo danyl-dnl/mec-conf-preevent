@@ -4,7 +4,7 @@ import DeleteParticipantsDialog from "./DeleteParticipantsDialog";
 import { selectedRosterRows, toggleRosterSelection } from "./rosterSelection";
 import ManualParticipantForm from "./ManualParticipantForm";
 import AdminProgress from "../../features/level1/AdminProgress";
-import AdminPuzzles from "../../features/level1/AdminPuzzles";
+import AdminManagement from "./AdminManagement";
 import { supabase } from "../../lib/supabase";
 import {
   parseCsvFile,
@@ -142,8 +142,7 @@ export default function AdminHome() {
 
 function AdminDashboard({ onSignOut }: { onSignOut: () => void }) {
   const [rosterRefreshToken, setRosterRefreshToken] = useState(0);
-  const [pairRefreshToken, setPairRefreshToken] = useState(0);
-  const onPairsChanged = useCallback(() => setPairRefreshToken(value => value + 1), []);
+  const onPairsChanged = useCallback(() => setRosterRefreshToken(value => value + 1), []);
   const [roster, setRoster] = useState<AdminParticipantRow[] | null>(null);
   const [isRosterLoading, setIsRosterLoading] = useState(false);
   const [rosterError, setRosterError] = useState<string | null>(null);
@@ -210,10 +209,10 @@ function AdminDashboard({ onSignOut }: { onSignOut: () => void }) {
 
       <RosterSection onImportSuccess={fetchRoster} />
 
-      <AdminRosterList roster={roster} isLoading={isRosterLoading} error={rosterError} onRefresh={fetchRoster} />
+      <AdminRosterList roster={roster} isLoading={isRosterLoading} error={rosterError} onRefresh={fetchRoster} onPairsChanged={onPairsChanged} />
 
       <PairSection onPairsChanged={onPairsChanged} refreshToken={rosterRefreshToken} />
-      <AdminPuzzles refreshToken={pairRefreshToken} />
+      <AdminManagement />
       <AdminProgress />
     </div>
   );
@@ -1058,34 +1057,57 @@ function AdminRosterList({
   roster,
   isLoading,
   error,
-  onRefresh
+  onRefresh,
+  onPairsChanged
 }: {
   roster: AdminParticipantRow[] | null;
   isLoading: boolean;
   error: string | null;
   onRefresh: () => void;
+  onPairsChanged?: () => void;
 }) {
   const [selected, setSelected] = useState<string[]>([]);
   const [pendingDelete, setPendingDelete] = useState<AdminParticipantRow[] | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteMessage, setDeleteMessage] = useState('');
   const deletingRef = useRef(false);
+  const [pairedMap, setPairedMap] = useState<Map<string, string>>(new Map());
+
+  useEffect(() => {
+    let active = true;
+    supabase.rpc("admin_list_pairs").then(({ data }) => {
+      if (!active || !Array.isArray(data)) return;
+      const map = new Map<string, string>();
+      for (const p of data) {
+        if (p && typeof p === "object") {
+          const r = p as Record<string, unknown>;
+          if (typeof r.member_a_code === "string" && typeof r.pair_code === "string") {
+            map.set(r.member_a_code, r.pair_code);
+          }
+          if (typeof r.member_b_code === "string" && typeof r.pair_code === "string") {
+            map.set(r.member_b_code, r.pair_code);
+          }
+        }
+      }
+      setPairedMap(map);
+    });
+    return () => { active = false; };
+  }, [roster]);
+
   async function confirmDelete() {
     if (!pendingDelete || deletingRef.current) return;
     deletingRef.current = true; setDeleting(true); setDeleteMessage('');
     try {
       const codes = pendingDelete.map(row => row.participant_code);
+      const pairedCount = pendingDelete.filter(row => pairedMap.has(row.participant_code)).length;
       const { data, error } = await supabase.rpc('admin_delete_participants', { participant_codes: codes });
       if (error) {
-        if (error.message.toLowerCase().includes('paired participants')) {
-          setDeleteMessage('Paired participants cannot be deleted. Nothing was deleted; choose only unpaired participants.');
-        } else {
-          setDeleteMessage('Deletion could not be confirmed. Review the refreshed roster before retrying.');
-        }
-      } else if (!data || data.deleted !== codes.length || Object.keys(data).length !== 1) {
+        setDeleteMessage('Deletion could not be confirmed: ' + error.message);
+      } else if (!data || data.deleted !== codes.length) {
         setDeleteMessage('Unexpected deletion response. Review the refreshed roster before retrying.');
       } else {
-        setDeleteMessage(`${data.deleted} participant${data.deleted === 1 ? '' : 's'} deleted.`);
+        const pairedNote = pairedCount > 0 ? ' (associated pair dissolved)' : '';
+        setDeleteMessage(`${data.deleted} participant${data.deleted === 1 ? '' : 's'} deleted${pairedNote}.`);
       }
     } catch {
       setDeleteMessage('Deletion could not be confirmed. Review the refreshed roster before retrying.');
@@ -1093,6 +1115,7 @@ function AdminRosterList({
       setPendingDelete(null); setSelected([]);
       setDeleting(false); deletingRef.current = false;
       onRefresh();
+      onPairsChanged?.();
     }
   }
   const [searchQuery, setSearchQuery] = useState("");
@@ -1191,7 +1214,7 @@ function AdminRosterList({
           <button type="button" disabled={deleting || isLoading || !!pendingDelete} style={{ ...secondaryBtnStyle, color: RED, borderColor: RED, width: 'auto' }}
             onClick={() => setPendingDelete(selectedRows)}>[ DELETE SELECTED ]</button>
         </div>}
-        {pendingDelete && <DeleteParticipantsDialog participants={pendingDelete} busy={deleting}
+        {pendingDelete && <DeleteParticipantsDialog participants={pendingDelete} pairedMap={pairedMap} busy={deleting}
           onCancel={() => setPendingDelete(null)} onConfirm={() => { void confirmDelete(); }} />}
 
         {/* Table */}
@@ -1216,7 +1239,14 @@ function AdminRosterList({
                   <td style={{ padding: "10px 12px", color: GREEN }}>{r.name}</td>
                   <td style={{ padding: "10px 12px", color: GREEN }}>{r.branch || "—"}</td>
                   <td style={{ padding: "10px 12px", color: GREEN }}>{r.registered_email}</td>
-                  <td style={{ padding: "10px 12px", color: GREEN_DIM }}>{r.is_linked ? "Linked" : "Not linked"}</td>
+                  <td style={{ padding: "10px 12px", color: GREEN_DIM }}>
+                    <div>{r.is_linked ? "Linked" : "Not linked"}</div>
+                    {pairedMap.has(r.participant_code) && (
+                      <div style={{ color: "#ffaa00", fontSize: "11px", marginTop: "3px", fontWeight: "bold" }}>
+                        Paired ({pairedMap.get(r.participant_code)})
+                      </div>
+                    )}
+                  </td>
                   <td style={{ padding: "10px 12px" }}><button type="button" aria-label={`Delete ${r.name} (${r.participant_code})`}
                     disabled={deleting || isLoading || !!pendingDelete} onClick={() => setPendingDelete([r])}
                     style={{ ...secondaryBtnStyle, width: 'auto', padding: '8px 12px', color: RED, borderColor: RED }}>[ DELETE ]</button></td>
