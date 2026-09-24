@@ -525,11 +525,35 @@ function LoginView({ onSignIn }: { onSignIn: () => void }) {
   return (
     <>
       <h1 style={s.heading}>YOUR HALF<br/>AWAITS.</h1>
-      <p style={s.subtext}>
+      <p style={{ ...s.subtext, marginBottom: "28px" }}>
         One puzzle. Two fragments.<br />
         Find your partner. Solve together.
       </p>
 
+      <div
+        style={{
+          width: "100%",
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+          marginBottom: "36px",
+          border: "1px solid var(--green-dim)",
+          background: "#000",
+          boxShadow: "0 0 20px rgba(57, 255, 20, 0.12)",
+          overflow: "hidden",
+        }}
+      >
+        <img
+          src="/split-faces.png"
+          alt="Split face fragments awaiting connection"
+          style={{
+            width: "100%",
+            height: "auto",
+            display: "block",
+            objectFit: "contain",
+          }}
+        />
+      </div>
 
       <button id="btn-google-signin" type="button" style={s.primaryBtn} onClick={onSignIn}>
         <GoogleIcon /> [ CONTINUE WITH GOOGLE ]
