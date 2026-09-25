@@ -7,7 +7,7 @@ import "../../index.css"; // Ensure styles are loaded
 
 // Event closing time: 24 September 2026 at 4:30 PM India Standard Time.
 // Update this single value for a future event.
-const EVENT_END_AT = new Date("2026-09-24T16:30:00+05:30");
+const EVENT_END_AT = new Date("2026-09-26T16:30:00+05:30");
 
 // ---------------------------------------------------------------------------
 // Types

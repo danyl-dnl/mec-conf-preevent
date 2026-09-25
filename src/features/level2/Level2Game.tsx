@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, useRef } from 'react';
 import { supabase } from '../../lib/supabase';
-import { Level2State, isLevel2State } from './types';
+import { isLevel2State, type Level2State } from './types';
 import './level2.css';
 
 export default function Level2Game({ onCompletedChange }: { onCompletedChange: (completed: boolean) => void }) {
@@ -39,7 +39,7 @@ export default function Level2Game({ onCompletedChange }: { onCompletedChange: (
       }
     }, 3000);
     return () => clearInterval(interval);
-  }, [refresh, state?.status, state?.is_my_turn]);
+  }, [refresh, state]);
 
   async function startLevel2() {
     setBusy(true);
@@ -79,11 +79,11 @@ export default function Level2Game({ onCompletedChange }: { onCompletedChange: (
     <section className="level2-section" aria-label="Level 2 puzzle">
       <h2>LEVEL 2</h2>
       {loading && <p role="status">Loading Level 2 status...</p>}
-      
+
       {!loading && state && (
         <>
           {state.status === 'NOT_PAIRED' && <p>You must be paired to play Level 2.</p>}
-          
+
           {state.status === 'NOT_STARTED' && (
             <div>
               <p>Ready for Level 2? Both partners will answer 10 questions in total, taking turns.</p>
@@ -102,11 +102,11 @@ export default function Level2Game({ onCompletedChange }: { onCompletedChange: (
                   <form onSubmit={e => { e.preventDefault(); void submit(); }}>
                     <label>
                       Answer:
-                      <input 
-                        value={answer} 
-                        onChange={e => setAnswer(e.target.value)} 
-                        disabled={busy} 
-                        autoComplete="off" 
+                      <input
+                        value={answer}
+                        onChange={e => setAnswer(e.target.value)}
+                        disabled={busy}
+                        autoComplete="off"
                         autoFocus
                       />
                     </label>
@@ -132,12 +132,12 @@ export default function Level2Game({ onCompletedChange }: { onCompletedChange: (
           )}
         </>
       )}
-      
+
       {message && <p className="level2-message" role="alert">{message}</p>}
-      
-      <button 
-        type="button" 
-        disabled={loading || busy} 
+
+      <button
+        type="button"
+        disabled={loading || busy}
         onClick={() => { setLoading(true); void refresh(); }}
         style={{ marginTop: '20px' }}
       >
