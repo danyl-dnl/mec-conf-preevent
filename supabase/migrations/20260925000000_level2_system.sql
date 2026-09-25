@@ -93,6 +93,10 @@ BEGIN
         WHERE pm.participant_id = v_participant_id FOR UPDATE OF p;
     IF NOT FOUND THEN RAISE EXCEPTION 'Not paired'; END IF;
     
+    IF v_pair_row.completed_at IS NULL THEN
+        RAISE EXCEPTION 'Level 1 must be completed before starting Level 2';
+    END IF;
+    
     IF v_pair_row.level2_started_at IS NOT NULL THEN
         RETURN pg_catalog.jsonb_build_object('status', 'ALREADY_STARTED');
     END IF;
@@ -124,6 +128,10 @@ BEGIN
     SELECT p.* INTO v_pair_row FROM public.pairs p JOIN public.pair_members pm ON pm.pair_id = p.id
         WHERE pm.participant_id = v_participant_id FOR UPDATE OF p;
     IF NOT FOUND THEN RAISE EXCEPTION 'Not paired'; END IF;
+    
+    IF v_pair_row.completed_at IS NULL THEN
+        RAISE EXCEPTION 'Level 1 must be completed before starting Level 2';
+    END IF;
     
     IF v_pair_row.level2_started_at IS NULL THEN RAISE EXCEPTION 'Level 2 not started'; END IF;
     IF v_pair_row.level2_current_index >= 10 THEN RAISE EXCEPTION 'Level 2 already completed'; END IF;
