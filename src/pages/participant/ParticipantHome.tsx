@@ -7,6 +7,7 @@ import "../../index.css"; // Ensure styles are loaded
 
 // Event closing time: 24 September 2026 at 4:30 PM India Standard Time.
 // Update this single value for a future event.
+const EVENT_START_AT = new Date("2026-09-25T19:45:00+05:30");
 const EVENT_END_AT = new Date("2026-09-26T16:30:00+05:30");
 
 // ---------------------------------------------------------------------------
@@ -260,6 +261,7 @@ const s = {
 // ---------------------------------------------------------------------------
 
 export default function ParticipantHome() {
+  const [eventStarted, setEventStarted] = useState(() => new Date() >= EVENT_START_AT);
   const [eventFinished, setEventFinished] = useState(() => new Date() >= EVENT_END_AT);
   const [linkStatus, setLinkStatus] = useState<LinkStatus>("loading");
   const verifyInFlight = useRef(false);
@@ -275,7 +277,10 @@ export default function ParticipantHome() {
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   useEffect(() => {
-    const updateEventStatus = () => setEventFinished(new Date() >= EVENT_END_AT);
+    const updateEventStatus = () => {
+      setEventStarted(new Date() >= EVENT_START_AT);
+      setEventFinished(new Date() >= EVENT_END_AT);
+    };
     const timer = window.setInterval(updateEventStatus, 1000);
     return () => window.clearInterval(timer);
   }, []);
@@ -441,7 +446,7 @@ export default function ParticipantHome() {
           <div style={s.hamburger}>≡</div>
         </div>
 
-        {eventFinished ? <EventFinishedView /> : <>
+        {!eventStarted ? <EventNotStartedView /> : eventFinished ? <EventFinishedView /> : <>
           {linkStatus === "loading" && <LoadingView />}
 
           {linkStatus === "unauthenticated" && (
@@ -533,6 +538,22 @@ function LoadingView() {
       <p style={s.subtext}>Establishing secure connection...</p>
       <div style={s.statusBar}>
         <div>&gt;&gt; CHECKING_SESSION...</div>
+        <div>&gt;&gt; PLEASE_WAIT.</div>
+      </div>
+    </>
+  );
+}
+
+function EventNotStartedView() {
+  return (
+    <>
+      <h1 style={s.heading}>STAND<br />BY.</h1>
+      <p style={s.subtext}>
+        Level 2 has not started yet.<br />
+        The portal will unlock automatically at 7:45 PM.
+      </p>
+      <div style={s.statusBar}>
+        <div>&gt;&gt; EVENT_STATUS: PENDING...</div>
         <div>&gt;&gt; PLEASE_WAIT.</div>
       </div>
     </>
