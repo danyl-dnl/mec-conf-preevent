@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import ParticipantPuzzle from "../../features/level1/ParticipantPuzzle";
+import Level2Game from "../../features/level2/Level2Game";
 import { supabase } from "../../lib/supabase";
 import { isPairState, isVerifyResult, type PairState } from "./verificationState";
 import "../../index.css"; // Ensure styles are loaded
@@ -367,7 +368,7 @@ export default function ParticipantHome() {
   async function handleVerify() {
     const code = partnerCodeInput.trim().toUpperCase();
     if (!code || verifyInFlight.current ||
-        (pairStatus !== "PAIRED" && pairStatus !== "INCORRECT") || attemptsRemaining <= 0) return;
+      (pairStatus !== "PAIRED" && pairStatus !== "INCORRECT") || attemptsRemaining <= 0) return;
 
     verifyInFlight.current = true;
     setIsVerifying(true);
@@ -441,77 +442,80 @@ export default function ParticipantHome() {
         </div>
 
         {eventFinished ? <EventFinishedView /> : <>
-        {linkStatus === "loading" && <LoadingView />}
+          {linkStatus === "loading" && <LoadingView />}
 
-        {linkStatus === "unauthenticated" && (
-          <LoginView onSignIn={handleGoogleSignIn} />
-        )}
+          {linkStatus === "unauthenticated" && (
+            <LoginView onSignIn={handleGoogleSignIn} />
+          )}
 
-        {linkStatus === "linked" && (
-          <>
-            <ParticipantPuzzle refreshToken={puzzleRefresh} onCompletedChange={setLevel1Completed} />
-            {!level1Completed && <>
-            {pairStatus === "loading_pair" && <LoadingView />}
+          {linkStatus === "linked" && (
+            <>
+              <ParticipantPuzzle refreshToken={puzzleRefresh} onCompletedChange={setLevel1Completed} />
+              {!level1Completed && <>
+                {pairStatus === "loading_pair" && <LoadingView />}
 
-            {pairStatus === "NOT_PAIRED" && (
-              <NotPairedView onSignOut={handleSignOut} />
-            )}
+                {pairStatus === "NOT_PAIRED" && (
+                  <NotPairedView onSignOut={handleSignOut} />
+                )}
 
-            {pairStatus === "error_pair" && (
-              <ErrorView message={errorMessage} onRetry={handleRefresh} onSignOut={handleSignOut} />
-            )}
+                {pairStatus === "error_pair" && (
+                  <ErrorView message={errorMessage} onRetry={handleRefresh} onSignOut={handleSignOut} />
+                )}
 
-            {(pairStatus === "PAIRED" || pairStatus === "INCORRECT") && pairState && (
-              <>
-                <div style={s.infoBox}>
-                  <div style={s.infoLabel}>Participant</div>
-                  <div style={{ ...s.infoValue, overflowWrap: "anywhere" }}>{pairState.name}</div>
-                  <div style={s.infoLabel}>Participant code</div>
-                  <div style={{ ...s.infoValue, overflowWrap: "anywhere" }}>{pairState.participant_code}</div>
-                  <div>FRAGMENT {pairState.fragment_slot}</div>
-                </div>
-                <VerificationView
-                  attemptsRemaining={attemptsRemaining}
-                  isIncorrect={pairStatus === "INCORRECT"}
-                  partnerCodeInput={partnerCodeInput}
-                  onPartnerCodeChange={setPartnerCodeInput}
-                  onVerify={handleVerify}
-                  isVerifying={isVerifying}
-                />
-              </>
-            )}
+                {(pairStatus === "PAIRED" || pairStatus === "INCORRECT") && pairState && (
+                  <>
+                    <div style={s.infoBox}>
+                      <div style={s.infoLabel}>Participant</div>
+                      <div style={{ ...s.infoValue, overflowWrap: "anywhere" }}>{pairState.name}</div>
+                      <div style={s.infoLabel}>Participant code</div>
+                      <div style={{ ...s.infoValue, overflowWrap: "anywhere" }}>{pairState.participant_code}</div>
+                      <div>FRAGMENT {pairState.fragment_slot}</div>
+                    </div>
+                    <VerificationView
+                      attemptsRemaining={attemptsRemaining}
+                      isIncorrect={pairStatus === "INCORRECT"}
+                      partnerCodeInput={partnerCodeInput}
+                      onPartnerCodeChange={setPartnerCodeInput}
+                      onVerify={handleVerify}
+                      isVerifying={isVerifying}
+                    />
+                  </>
+                )}
 
-            {pairStatus === "LOCKED" && (
-              <LockedView onSignOut={handleSignOut} />
-            )}
+                {pairStatus === "LOCKED" && (
+                  <LockedView onSignOut={handleSignOut} />
+                )}
 
-            {pairStatus === "SELF_VERIFIED" && (
-              <SelfVerifiedView
-                onRefresh={handleRefresh}
-                isRefreshing={isRefreshing}
-              />
-            )}
+                {pairStatus === "SELF_VERIFIED" && (
+                  <SelfVerifiedView
+                    onRefresh={handleRefresh}
+                    isRefreshing={isRefreshing}
+                  />
+                )}
 
-            {pairStatus === "MUTUAL_VERIFIED" && (
-              <MutualVerifiedView />
-            )}
-            </>}
-          </>
-        )}
+                {pairStatus === "MUTUAL_VERIFIED" && (
+                  <MutualVerifiedView />
+                )}
+              </>}
+              {level1Completed && (
+                <Level2Game onCompletedChange={() => { }} />
+              )}
+            </>
+          )}
 
-        {linkStatus === "not_registered" && (
-          <NotRegisteredView onSignOut={handleSignOut} />
-        )}
+          {linkStatus === "not_registered" && (
+            <NotRegisteredView onSignOut={handleSignOut} />
+          )}
 
-        {linkStatus === "denied" && <DeniedView onSignOut={handleSignOut} />}
+          {linkStatus === "denied" && <DeniedView onSignOut={handleSignOut} />}
 
-        {linkStatus === "error" && (
-          <ErrorView
-            message={errorMessage}
-            onRetry={performLinking}
-            onSignOut={handleSignOut}
-          />
-        )}
+          {linkStatus === "error" && (
+            <ErrorView
+              message={errorMessage}
+              onRetry={performLinking}
+              onSignOut={handleSignOut}
+            />
+          )}
         </>}
       </div>
     </div>
@@ -558,7 +562,7 @@ function EventFinishedView() {
 function LoginView({ onSignIn }: { onSignIn: () => void }) {
   return (
     <>
-      <h1 style={s.heading}>YOUR HALF<br/>AWAITS.</h1>
+      <h1 style={s.heading}>YOUR HALF<br />AWAITS.</h1>
       <p style={{ ...s.subtext, marginBottom: "28px" }}>
         One puzzle. Two fragments.<br />
         Find your partner. Solve together.
@@ -587,12 +591,12 @@ function LoginView({ onSignIn }: { onSignIn: () => void }) {
       <div style={s.statusBar}>
         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
           <div>
-            &gt;&gt; AUTHENTICATION_REQUIRED...<br/>
-            &gt;&gt; INITIATING_SECURE_LOGIN...<br/>
+            &gt;&gt; AUTHENTICATION_REQUIRED...<br />
+            &gt;&gt; INITIATING_SECURE_LOGIN...<br />
             &gt;&gt; STANDBY...
           </div>
           <div style={{ textAlign: 'right' }}>
-            MEC.CONF<br/>2026
+            MEC.CONF<br />2026
           </div>
         </div>
       </div>
@@ -695,12 +699,12 @@ function VerificationView({
       <div style={s.statusBar}>
         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
           <div>
-            &gt;&gt; SEEKING_CONNECTION...<br/>
-            &gt;&gt; INPUT_PARTNER_ID...<br/>
+            &gt;&gt; SEEKING_CONNECTION...<br />
+            &gt;&gt; INPUT_PARTNER_ID...<br />
             &gt;&gt; ESTABLISH_LINK...
           </div>
           <div style={{ textAlign: 'right' }}>
-            MEC.CONF<br/>2026
+            MEC.CONF<br />2026
           </div>
         </div>
       </div>
@@ -777,7 +781,7 @@ function MutualVerifiedView() {
 function NotRegisteredView({ onSignOut }: { onSignOut: () => void }) {
   return (
     <>
-      <h1 style={s.heading}>ACCESS<br/>DENIED.</h1>
+      <h1 style={s.heading}>ACCESS<br />DENIED.</h1>
       <p style={s.subtext}>
         Your Google account is not on the approved participant list for this event.
         <br /><br />
@@ -797,7 +801,7 @@ function NotRegisteredView({ onSignOut }: { onSignOut: () => void }) {
 function DeniedView({ onSignOut }: { onSignOut: () => void }) {
   return (
     <>
-      <h1 style={s.heading}>LINK<br/>ERROR.</h1>
+      <h1 style={s.heading}>LINK<br />ERROR.</h1>
       <p style={s.subtext}>
         There was a problem linking your account.
         <br /><br />
@@ -825,7 +829,7 @@ function ErrorView({
 }) {
   return (
     <>
-      <h1 style={s.heading}>TRANSMISSION<br/>FAILED.</h1>
+      <h1 style={s.heading}>TRANSMISSION<br />FAILED.</h1>
       <p style={s.subtext}>{message ?? "An unexpected error occurred. Please try again."}</p>
       <button id="btn-retry" type="button" style={s.primaryBtn} onClick={onRetry}>
         [ TRY AGAIN ]
