@@ -4,6 +4,7 @@ import DeleteParticipantsDialog from "./DeleteParticipantsDialog";
 import { selectedRosterRows, toggleRosterSelection } from "./rosterSelection";
 import ManualParticipantForm from "./ManualParticipantForm";
 import AdminProgress from "../../features/level1/AdminProgress";
+import AdminLevel2Progress from "../../features/level2/AdminLevel2Progress";
 import AdminManagement from "./AdminManagement";
 import { supabase } from "../../lib/supabase";
 import {
@@ -32,16 +33,16 @@ import type {
 // Design tokens
 // ---------------------------------------------------------------------------
 
-const GREEN       = "#39ff14";
-const GREEN_DIM   = "rgba(57,255,20,0.55)";
+const GREEN = "#39ff14";
+const GREEN_DIM = "rgba(57,255,20,0.55)";
 const GREEN_FAINT = "rgba(57,255,20,0.12)";
-const GREEN_GLOW  = "rgba(57,255,20,0.08)";
-const BG          = "#050905";
-const RED         = "#ff4444";
-const RED_FAINT   = "rgba(255,68,68,0.12)";
-const AMBER       = "#ffb347";
-const GREY        = "rgba(57,255,20,0.30)";
-const MONO        = "'Courier New', Courier, monospace";
+const GREEN_GLOW = "rgba(57,255,20,0.08)";
+const BG = "#050905";
+const RED = "#ff4444";
+const RED_FAINT = "rgba(255,68,68,0.12)";
+const AMBER = "#ffb347";
+const GREY = "rgba(57,255,20,0.30)";
+const MONO = "'Courier New', Courier, monospace";
 
 // ---------------------------------------------------------------------------
 // Auth types
@@ -54,7 +55,7 @@ type AdminStatus = "loading" | "unauthenticated" | "is_admin" | "not_admin" | "e
 // ---------------------------------------------------------------------------
 
 export default function AdminHome() {
-  const [status, setStatus]       = useState<AdminStatus>("loading");
+  const [status, setStatus] = useState<AdminStatus>("loading");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
@@ -84,7 +85,7 @@ export default function AdminHome() {
       return;
     }
     const result = data as string | null;
-    if (result === "IS_ADMIN")       setStatus("is_admin");
+    if (result === "IS_ADMIN") setStatus("is_admin");
     else if (result === "NOT_ADMIN") setStatus("not_admin");
     else {
       setErrorMessage("An unexpected response was received. Please try again.");
@@ -107,21 +108,25 @@ export default function AdminHome() {
   }
 
   return (
-    <div style={{ background: BG, minHeight: "100svh", display: "flex", flexDirection: "column",
-                  alignItems: "center", fontFamily: MONO, color: GREEN, boxSizing: "border-box" }}>
+    <div style={{
+      background: BG, minHeight: "100svh", display: "flex", flexDirection: "column",
+      alignItems: "center", fontFamily: MONO, color: GREEN, boxSizing: "border-box"
+    }}>
 
       {/* Narrow auth card for non-admin states */}
       {status !== "is_admin" && (
-        <div style={{ width: "100%", maxWidth: "420px", padding: "32px 24px", display: "flex",
-                      flexDirection: "column", flexGrow: 1, justifyContent: "center" }}>
+        <div style={{
+          width: "100%", maxWidth: "420px", padding: "32px 24px", display: "flex",
+          flexDirection: "column", flexGrow: 1, justifyContent: "center"
+        }}>
           <div style={{ fontSize: "11px", letterSpacing: "0.18em", color: GREEN_DIM, marginBottom: "40px", lineHeight: "1.8" }}>
             MEC.CONF 2026&nbsp;&nbsp;//&nbsp;&nbsp;ADMIN
           </div>
 
-          {status === "loading"         && <LoadingView />}
+          {status === "loading" && <LoadingView />}
           {status === "unauthenticated" && <LoginView onSignIn={handleGoogleSignIn} />}
-          {status === "not_admin"       && <DeniedView onSignOut={handleSignOut} />}
-          {status === "error"           && (
+          {status === "not_admin" && <DeniedView onSignOut={handleSignOut} />}
+          {status === "error" && (
             <ErrorView message={errorMessage} onRetry={performAdminCheck} onSignOut={handleSignOut} />
           )}
         </div>
@@ -172,8 +177,8 @@ function AdminDashboard({ onSignOut }: { onSignOut: () => void }) {
       if (typeof item !== "object" || item === null) continue;
       const r = item as Record<string, unknown>;
       if (typeof r.participant_code === "string" && typeof r.name === "string" &&
-          (typeof r.branch === "string" || r.branch === null) &&
-          typeof r.registered_email === "string" && typeof r.is_linked === "boolean") {
+        (typeof r.branch === "string" || r.branch === null) &&
+        typeof r.registered_email === "string" && typeof r.is_linked === "boolean") {
         validRoster.push({
           participant_code: r.participant_code,
           name: r.name,
@@ -191,9 +196,11 @@ function AdminDashboard({ onSignOut }: { onSignOut: () => void }) {
   return (
     <div style={{ width: "100%", maxWidth: "1100px", padding: "32px 24px", boxSizing: "border-box" }}>
       {/* Header bar */}
-      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between",
-                    borderBottom: `1px solid ${GREEN_FAINT}`, paddingBottom: "16px", marginBottom: "40px",
-                    flexWrap: "wrap", gap: "12px" }}>
+      <div style={{
+        display: "flex", alignItems: "baseline", justifyContent: "space-between",
+        borderBottom: `1px solid ${GREEN_FAINT}`, paddingBottom: "16px", marginBottom: "40px",
+        flexWrap: "wrap", gap: "12px"
+      }}>
         <div>
           <div style={{ fontSize: "11px", letterSpacing: "0.18em", color: GREEN_DIM, marginBottom: "6px" }}>
             MEC.CONF 2026 &nbsp;//&nbsp; ADMIN CONSOLE
@@ -214,6 +221,7 @@ function AdminDashboard({ onSignOut }: { onSignOut: () => void }) {
       <PairSection onPairsChanged={onPairsChanged} refreshToken={rosterRefreshToken} />
       <AdminManagement />
       <AdminProgress />
+      <AdminLevel2Progress />
     </div>
   );
 }
@@ -235,17 +243,17 @@ function RosterSection({ onImportSuccess }: { onImportSuccess: () => void }) {
     setShowConfirmModal(false);
   }
   // ── File / CSV state ────────────────────────────────────────────────────
-  const [csv, setCsv]             = useState<ParsedCsv | null>(null);
-  const [csvError, setCsvError]   = useState<string | null>(null);
-  const [fileName, setFileName]   = useState<string | null>(null);
+  const [csv, setCsv] = useState<ParsedCsv | null>(null);
+  const [csvError, setCsvError] = useState<string | null>(null);
+  const [fileName, setFileName] = useState<string | null>(null);
   const [isParsing, setIsParsing] = useState(false);
-  const fileInputRef              = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // ── Column mapping state ─────────────────────────────────────────────────
-  const [mapping, setMapping]     = useState<FieldMapping>({ name: null, email: null, branch: null });
+  const [mapping, setMapping] = useState<FieldMapping>({ name: null, email: null, branch: null });
 
   // ── Preview state ────────────────────────────────────────────────────────
-  const [preview, setPreview]     = useState<PreviewState>({ status: "idle" });
+  const [preview, setPreview] = useState<PreviewState>({ status: "idle" });
   const [isPreviewing, setIsPreviewing] = useState(false);
   // Keep the payload that generated the current preview for email display
   const [previewPayload, setPreviewPayload] = useState<RosterPayloadRow[]>([]);
@@ -371,14 +379,14 @@ function RosterSection({ onImportSuccess }: { onImportSuccess: () => void }) {
       if (typeof item !== "object" || item === null) continue;
       const r = item as Record<string, unknown>;
       rows.push({
-        row_number:        typeof r.row_number === "number" ? r.row_number : 0,
-        category:          (r.category as PreviewCategory) ?? "CONFLICT",
-        is_blocking:       Boolean(r.is_blocking),
+        row_number: typeof r.row_number === "number" ? r.row_number : 0,
+        category: (r.category as PreviewCategory) ?? "CONFLICT",
+        is_blocking: Boolean(r.is_blocking),
         is_suspicious_email: Boolean(r.is_suspicious_email),
-        csv_name:          typeof r.csv_name === "string" ? r.csv_name : null,
-        csv_branch:        typeof r.csv_branch === "string" ? r.csv_branch : null,
-        db_name:           typeof r.db_name === "string" ? r.db_name : null,
-        db_branch:         typeof r.db_branch === "string" ? r.db_branch : null,
+        csv_name: typeof r.csv_name === "string" ? r.csv_name : null,
+        csv_branch: typeof r.csv_branch === "string" ? r.csv_branch : null,
+        db_name: typeof r.db_name === "string" ? r.db_name : null,
+        db_branch: typeof r.db_branch === "string" ? r.db_branch : null,
       });
     }
 
@@ -407,9 +415,9 @@ function RosterSection({ onImportSuccess }: { onImportSuccess: () => void }) {
 
     const r = data as Record<string, unknown>;
     if (r.success !== true ||
-        typeof r.imported !== "number" || r.imported < 0 || !Number.isFinite(r.imported) ||
-        typeof r.updated !== "number" || r.updated < 0 || !Number.isFinite(r.updated) ||
-        typeof r.skipped !== "number" || r.skipped < 0 || !Number.isFinite(r.skipped)) {
+      typeof r.imported !== "number" || r.imported < 0 || !Number.isFinite(r.imported) ||
+      typeof r.updated !== "number" || r.updated < 0 || !Number.isFinite(r.updated) ||
+      typeof r.skipped !== "number" || r.skipped < 0 || !Number.isFinite(r.skipped)) {
       setImportError("Invalid success confirmation from server. Refresh the roster and try again.");
       return;
     }
@@ -436,12 +444,14 @@ function RosterSection({ onImportSuccess }: { onImportSuccess: () => void }) {
 
   // ── Computed summary counts ──────────────────────────────────────────────
   const mappingConflicts = getMappingConflicts(mapping);
-  const mappingReady     = isMappingComplete(mapping) && mappingConflicts.length === 0;
+  const mappingReady = isMappingComplete(mapping) && mappingConflicts.length === 0;
 
   return (
     <section aria-labelledby="roster-section-heading">
-      <h2 id="roster-section-heading" style={{ fontSize: "13px", letterSpacing: "0.16em",
-          color: GREEN_DIM, marginBottom: "28px", fontWeight: "normal" }}>
+      <h2 id="roster-section-heading" style={{
+        fontSize: "13px", letterSpacing: "0.16em",
+        color: GREEN_DIM, marginBottom: "28px", fontWeight: "normal"
+      }}>
         &gt;&gt; SECTION: ROSTER_MANAGEMENT
       </h2>
 
@@ -675,8 +685,8 @@ function RosterSection({ onImportSuccess }: { onImportSuccess: () => void }) {
 // ---------------------------------------------------------------------------
 
 const FIELD_LABELS: Record<RequiredField, string> = {
-  name:   "Participant Name",
-  email:  "Email Address",
+  name: "Participant Name",
+  email: "Email Address",
   branch: "Branch / Department",
 };
 
@@ -702,8 +712,10 @@ function MappingForm({
           <div key={field}>
             <label
               htmlFor={`${id}-${field}`}
-              style={{ display: "block", fontSize: "12px", color: isConflict ? RED : GREEN_DIM,
-                       letterSpacing: "0.08em", marginBottom: "6px" }}
+              style={{
+                display: "block", fontSize: "12px", color: isConflict ? RED : GREEN_DIM,
+                letterSpacing: "0.08em", marginBottom: "6px"
+              }}
             >
               {FIELD_LABELS[field]} {selectedIdx === null && <span style={{ color: AMBER }}>← required</span>}
             </label>
@@ -742,13 +754,13 @@ function MappingForm({
 function PreviewResults({ rows, payloadMap }: { rows: PreviewResultRow[]; payloadMap: Record<number, RosterPayloadRow> }) {
   // Summary counts
   const counts = {
-    total:        rows.length,
-    new_:         rows.filter((r) => r.category === "NEW").length,
-    updates:      rows.filter((r) => r.category === "DETAILS_UPDATE").length,
-    active:       rows.filter((r) => r.category === "ALREADY_ACTIVE").length,
-    unchanged:    rows.filter((r) => r.category === "UNCHANGED").length,
-    problems:     rows.filter((r) => r.is_blocking).length,
-    warnings:     rows.filter((r) => r.is_suspicious_email && !r.is_blocking).length,
+    total: rows.length,
+    new_: rows.filter((r) => r.category === "NEW").length,
+    updates: rows.filter((r) => r.category === "DETAILS_UPDATE").length,
+    active: rows.filter((r) => r.category === "ALREADY_ACTIVE").length,
+    unchanged: rows.filter((r) => r.category === "UNCHANGED").length,
+    problems: rows.filter((r) => r.is_blocking).length,
+    warnings: rows.filter((r) => r.is_suspicious_email && !r.is_blocking).length,
   };
 
   const hasBlocking = counts.problems > 0;
@@ -762,19 +774,21 @@ function PreviewResults({ rows, payloadMap }: { rows: PreviewResultRow[]; payloa
 
       {/* Summary bar */}
       <div style={{ display: "flex", flexWrap: "wrap", gap: "12px", marginBottom: "24px" }}>
-        <SummaryChip label="TOTAL"    value={counts.total}    color={GREEN} />
-        <SummaryChip label="NEW"      value={counts.new_}     color={GREEN} />
-        <SummaryChip label="UPDATES"  value={counts.updates}  color={AMBER} />
-        <SummaryChip label="ACTIVE"   value={counts.active}   color={GREEN_DIM} />
+        <SummaryChip label="TOTAL" value={counts.total} color={GREEN} />
+        <SummaryChip label="NEW" value={counts.new_} color={GREEN} />
+        <SummaryChip label="UPDATES" value={counts.updates} color={AMBER} />
+        <SummaryChip label="ACTIVE" value={counts.active} color={GREEN_DIM} />
         <SummaryChip label="UNCHANGED" value={counts.unchanged} color={GREEN_DIM} />
         <SummaryChip label="PROBLEMS" value={counts.problems} color={counts.problems > 0 ? RED : GREEN_DIM} />
         <SummaryChip label="WARNINGS" value={counts.warnings} color={counts.warnings > 0 ? AMBER : GREEN_DIM} />
       </div>
 
       {hasBlocking && (
-        <div role="alert" style={{ background: RED_FAINT, border: `1px solid ${RED}`, padding: "12px 16px",
-                                   fontSize: "13px", color: RED, marginBottom: "20px", lineHeight: "1.7",
-                                   letterSpacing: "0.04em" }}>
+        <div role="alert" style={{
+          background: RED_FAINT, border: `1px solid ${RED}`, padding: "12px 16px",
+          fontSize: "13px", color: RED, marginBottom: "20px", lineHeight: "1.7",
+          letterSpacing: "0.04em"
+        }}>
           ⚠ {counts.problems} row{counts.problems !== 1 ? "s" : ""} must be fixed in the source CSV before import can proceed.
           Fix the issues and re-upload the file.
         </div>
@@ -786,9 +800,11 @@ function PreviewResults({ rows, payloadMap }: { rows: PreviewResultRow[]; payloa
           <thead>
             <tr style={{ borderBottom: `1px solid ${GREEN_FAINT}` }}>
               {["Row", "Name", "Branch", "Email", "Status", "Details"].map((col) => (
-                <th key={col} style={{ textAlign: "left", padding: "8px 12px", color: GREEN_DIM,
-                                       fontWeight: "normal", fontSize: "11px", letterSpacing: "0.12em",
-                                       whiteSpace: "nowrap" }}>
+                <th key={col} style={{
+                  textAlign: "left", padding: "8px 12px", color: GREEN_DIM,
+                  fontWeight: "normal", fontSize: "11px", letterSpacing: "0.12em",
+                  whiteSpace: "nowrap"
+                }}>
                   {col.toUpperCase()}
                 </th>
               ))}
@@ -807,9 +823,11 @@ function PreviewResults({ rows, payloadMap }: { rows: PreviewResultRow[]; payloa
 
 function SummaryChip({ label, value, color }: { label: string; value: number; color: string }) {
   return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center",
-                  border: `1px solid ${color === GREEN ? GREEN_FAINT : "rgba(255,179,71,0.25)"}`,
-                  padding: "10px 16px", minWidth: "80px", background: GREEN_GLOW }}>
+    <div style={{
+      display: "flex", flexDirection: "column", alignItems: "center",
+      border: `1px solid ${color === GREEN ? GREEN_FAINT : "rgba(255,179,71,0.25)"}`,
+      padding: "10px 16px", minWidth: "80px", background: GREEN_GLOW
+    }}>
       <span style={{ fontSize: "22px", fontWeight: "bold", color, lineHeight: 1 }}>{value}</span>
       <span style={{ fontSize: "10px", color: GREEN_DIM, letterSpacing: "0.12em", marginTop: "4px" }}>{label}</span>
     </div>
@@ -818,26 +836,26 @@ function SummaryChip({ label, value, color }: { label: string; value: number; co
 
 // Human-readable category labels
 const CATEGORY_LABELS: Record<PreviewCategory, string> = {
-  NEW:                   "New participant",
-  UNCHANGED:             "Already in roster",
-  DETAILS_UPDATE:        "Details will be updated",
-  ALREADY_ACTIVE:        "Already active",
-  DUPLICATE_IN_FILE:     "Duplicate email",
-  INVALID_EMAIL:         "Invalid email",
-  MISSING_REQUIRED_FIELD:"Missing information",
-  CONFLICT:              "Cannot process",
+  NEW: "New participant",
+  UNCHANGED: "Already in roster",
+  DETAILS_UPDATE: "Details will be updated",
+  ALREADY_ACTIVE: "Already active",
+  DUPLICATE_IN_FILE: "Duplicate email",
+  INVALID_EMAIL: "Invalid email",
+  MISSING_REQUIRED_FIELD: "Missing information",
+  CONFLICT: "Cannot process",
 };
 
 function categoryColor(cat: PreviewCategory, isBlocking: boolean): string {
   if (isBlocking) return RED;
-  if (cat === "NEW")            return GREEN;
+  if (cat === "NEW") return GREEN;
   if (cat === "DETAILS_UPDATE") return AMBER;
   if (cat === "ALREADY_ACTIVE" || cat === "UNCHANGED") return GREEN_DIM;
   return GREEN_DIM;
 }
 
 function PreviewRow({ row, payloadRow }: { row: PreviewResultRow; payloadRow?: RosterPayloadRow }) {
-  const rowBg  = row.is_blocking ? RED_FAINT : "transparent";
+  const rowBg = row.is_blocking ? RED_FAINT : "transparent";
   const catCol = categoryColor(row.category, row.is_blocking);
 
   const displayName = row.csv_name || payloadRow?.name || "";
@@ -909,10 +927,14 @@ function PreviewRow({ row, payloadRow }: { row: PreviewResultRow; payloadRow?: R
 
 function SectionBlock({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div style={{ border: `1px solid ${GREEN_FAINT}`, padding: "24px", marginBottom: "24px",
-                  background: GREEN_GLOW }}>
-      <div style={{ fontSize: "11px", letterSpacing: "0.16em", color: GREEN_DIM,
-                    marginBottom: "20px", fontWeight: "bold" }}>
+    <div style={{
+      border: `1px solid ${GREEN_FAINT}`, padding: "24px", marginBottom: "24px",
+      background: GREEN_GLOW
+    }}>
+      <div style={{
+        fontSize: "11px", letterSpacing: "0.16em", color: GREEN_DIM,
+        marginBottom: "20px", fontWeight: "bold"
+      }}>
         {label}
       </div>
       {children}
@@ -930,9 +952,11 @@ function StatusLine({ text }: { text: string }) {
 
 function ErrorBox({ message }: { message: string }) {
   return (
-    <div role="alert" style={{ background: RED_FAINT, border: `1px solid ${RED}`, padding: "12px 16px",
-                               fontSize: "13px", color: RED, marginTop: "14px", lineHeight: "1.7",
-                               letterSpacing: "0.02em" }}>
+    <div role="alert" style={{
+      background: RED_FAINT, border: `1px solid ${RED}`, padding: "12px 16px",
+      fontSize: "13px", color: RED, marginTop: "14px", lineHeight: "1.7",
+      letterSpacing: "0.02em"
+    }}>
       ✕ {message}
     </div>
   );
@@ -1027,8 +1051,8 @@ function ErrorView({
     <>
       <h1 style={headingStyle}>TRANSMISSION{"\n"}FAILED.</h1>
       <p style={subtextStyle}>{message ?? "An unexpected error occurred. Please try again."}</p>
-      <button id="btn-admin-error-retry"    type="button" style={primaryBtnStyle}    onClick={onRetry}>[ TRY AGAIN ]</button>
-      <button id="btn-admin-error-sign-out" type="button" style={secondaryBtnStyle}  onClick={onSignOut}>[ SIGN OUT ]</button>
+      <button id="btn-admin-error-retry" type="button" style={primaryBtnStyle} onClick={onRetry}>[ TRY AGAIN ]</button>
+      <button id="btn-admin-error-sign-out" type="button" style={secondaryBtnStyle} onClick={onSignOut}>[ SIGN OUT ]</button>
       <div style={statusBarStyle}>
         <div>&gt;&gt; CONNECTION_FAILED...</div>
         <div>&gt;&gt; RETRY_OR_SIGN_OUT.</div>
@@ -1145,8 +1169,8 @@ function AdminRosterList({
     if (searchQuery.trim()) {
       const q = searchQuery.trim().toLowerCase();
       if (!r.name.toLowerCase().includes(q) &&
-          !r.registered_email.toLowerCase().includes(q) &&
-          !r.participant_code.toLowerCase().includes(q)) {
+        !r.registered_email.toLowerCase().includes(q) &&
+        !r.participant_code.toLowerCase().includes(q)) {
         return false;
       }
     }
@@ -1471,7 +1495,7 @@ function PairSection({ onPairsChanged, refreshToken }: { onPairsChanged: () => v
       });
       const confirmed = error ? null : validateCreatePairResult(data);
       if (!confirmed || confirmed.member_a.participant_code !== a.participant_code ||
-          confirmed.member_b.participant_code !== b.participant_code) throw new Error('Pair not confirmed');
+        confirmed.member_b.participant_code !== b.participant_code) throw new Error('Pair not confirmed');
     });
     setRandomPlan(null);
     setRandomMessage(result.complete
@@ -1490,8 +1514,10 @@ function PairSection({ onPairsChanged, refreshToken }: { onPairsChanged: () => v
 
   return (
     <section aria-labelledby="pair-section-heading" style={{ marginTop: "48px" }}>
-      <h2 id="pair-section-heading" style={{ fontSize: "13px", letterSpacing: "0.16em",
-          color: GREEN_DIM, marginBottom: "28px", fontWeight: "normal" }}>
+      <h2 id="pair-section-heading" style={{
+        fontSize: "13px", letterSpacing: "0.16em",
+        color: GREEN_DIM, marginBottom: "28px", fontWeight: "normal"
+      }}>
         &gt;&gt; SECTION: PAIR_ASSIGNMENT
       </h2>
 
@@ -1524,8 +1550,10 @@ function PairSection({ onPairsChanged, refreshToken }: { onPairsChanged: () => v
 
         {/* Last created success message */}
         {lastCreated && (
-          <div style={{ padding: "16px", border: `1px solid ${GREEN}`, marginBottom: "24px",
-                        background: GREEN_GLOW, fontSize: "13px", lineHeight: "1.8" }}>
+          <div style={{
+            padding: "16px", border: `1px solid ${GREEN}`, marginBottom: "24px",
+            background: GREEN_GLOW, fontSize: "13px", lineHeight: "1.8"
+          }}>
             <div style={{ color: GREEN, fontWeight: "bold", marginBottom: "8px" }}>
               {lastCreated.pair_code} CREATED — PUZZLE ASSIGNED
             </div>
@@ -1702,8 +1730,10 @@ function PairSection({ onPairsChanged, refreshToken }: { onPairsChanged: () => v
               <thead>
                 <tr style={{ borderBottom: `1px solid ${GREEN_FAINT}` }}>
                   {["PAIR", "FRAGMENT A", "FRAGMENT B"].map(col => (
-                    <th key={col} style={{ textAlign: "left", padding: "8px 12px", color: GREEN_DIM,
-                                           fontWeight: "normal", fontSize: "11px", letterSpacing: "0.08em" }}>
+                    <th key={col} style={{
+                      textAlign: "left", padding: "8px 12px", color: GREEN_DIM,
+                      fontWeight: "normal", fontSize: "11px", letterSpacing: "0.08em"
+                    }}>
                       {col}
                     </th>
                   ))}
